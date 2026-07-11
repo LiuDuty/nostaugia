@@ -56,6 +56,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Geo
 #pc-camera{position:fixed;left:16px;bottom:16px;z-index:21;width:220px;background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:10px;color:#fff;font:12px/1.35 system-ui;box-shadow:0 8px 28px rgba(0,0,0,.35)}
 #pc-camera video{width:100%;aspect-ratio:4/3;object-fit:cover;background:#111;border-radius:10px;display:none;margin-bottom:8px;transform:scaleX(-1)}
 #pc-camera button{width:100%;border:0;border-radius:999px;padding:10px 12px;background:#1565c0;color:#fff;font:bold 12px system-ui;cursor:pointer}
+#pc-camera .record-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+#pc-camera button.record{background:#c62828}
+#pc-camera button.stop{background:#424242}
+#pc-camera button:disabled{opacity:.45;cursor:not-allowed}
 #pc-camera label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 4px;color:rgba(255,255,255,.82);font:bold 12px system-ui}
 #pc-camera input[type=range]{width:100%;accent-color:#4fc3f7}
 #pc-camera select{width:100%;border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:8px 9px;background:#101820;color:#fff;font:12px system-ui;outline:none;margin-bottom:8px}
@@ -75,7 +79,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Geo
 <a id="calib-shortcut" href="/calibracao.html" target="_blank" rel="noopener">Calibrar câmera</a>
 <div id="actions"><a class="calib" href="/calibracao.html" target="_blank" rel="noopener">Calibrar câmera</a><button id="shuffle">Misturar</button><button id="moveLeft" class="test">Peças à esquerda</button><button id="placeAll" class="test">Colocar todas</button></div>
 <div id="rotbar"><button id="rotL" title="Girar esquerda">↺</button><button id="rotR" title="Girar direita">↻</button></div>
-<div id="pc-camera"><video id="pcVideo" autoplay playsinline muted></video><select id="pcCameraSelect"><option value="">Câmera padrão</option></select><button id="startPcCamera">Ligar câmera do computador</button><label for="pcZoom">Zoom / afastar <span id="pcZoomVal">1.0x</span></label><input id="pcZoom" type="range" min="0.5" max="4" step="0.1" value="1"><small id="pcCamStatus">Sem câmera local. O Ghost6 ainda pode ouvir Firestore se o celular estiver aberto.</small></div>
+<div id="pc-camera"><video id="pcVideo" autoplay playsinline muted></video><select id="pcCameraSelect"><option value="">Câmera padrão</option></select><button id="startPcCamera">Ligar câmera do computador</button><div class="record-row"><button id="recordStart" class="record">Gravar</button><button id="recordStop" class="stop" disabled>Parar</button></div><label for="pcZoom">Zoom / afastar <span id="pcZoomVal">1.0x</span></label><input id="pcZoom" type="range" min="0.5" max="4" step="0.1" value="1"><small id="pcCamStatus">Sem câmera local. O Ghost6 ainda pode ouvir Firestore se o celular estiver aberto.</small></div>
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
@@ -107,6 +111,8 @@ const pcCamStatus=document.getElementById('pcCamStatus');
 const pcZoom=document.getElementById('pcZoom');
 const pcZoomVal=document.getElementById('pcZoomVal');
 const pcCameraSelect=document.getElementById('pcCameraSelect');
+const recordStart=document.getElementById('recordStart');
+const recordStop=document.getElementById('recordStop');
 const CAMERA_KEY='infinite-puzzle-camera-device-id';
 let arucoDict=null;
 const ghosts={};
@@ -114,6 +120,7 @@ const pcCanvas=document.createElement('canvas');
 pcCanvas.width=640;pcCanvas.height=480;
 const pcCtx=pcCanvas.getContext('2d',{willReadFrequently:true});
 let pcDetector=null,pcCameraRunning=false,pcTrackTs=0,pcStream=null,pcTrack=null,pcZoomCaps=null,pcUseNativeZoom=false,pcZoomValue=parseFloat(localStorage.getItem('infinite-puzzle-ghost6-pc-zoom')||'1')||1;
+let mediaRecorder=null,recordedChunks=[];
 
 function showToast(t){toast.textContent=t;toast.style.opacity='1';clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.style.opacity='0',900)}
 function normDeg(v){v%=360;if(v<0)v+=360;return v}
@@ -505,6 +512,71 @@ function markerToTracking(marker){
   return {score:100,ts:Date.now(),corners};
 }
 
+function recordingMimeType(){
+  const types=['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  for(const type of types){
+    if(window.MediaRecorder&&MediaRecorder.isTypeSupported(type))return type;
+  }
+  return '';
+}
+
+function recordingFileName(){
+  const d=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const type=(mediaRecorder&&mediaRecorder.mimeType)||recordingMimeType();
+  const ext=type.indexOf('mp4')>=0?'mp4':'webm';
+  return 'ghost6-camera-'+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'.'+ext;
+}
+
+function startRecording(){
+  if(!pcStream){
+    pcCamStatus.textContent='Ligue a câmera antes de gravar';
+    return;
+  }
+  if(mediaRecorder)return;
+  if(!window.MediaRecorder){
+    pcCamStatus.textContent='Este navegador não suporta gravação';
+    return;
+  }
+  recordedChunks=[];
+  const mimeType=recordingMimeType();
+  const options=mimeType?{mimeType}:undefined;
+  try{
+    mediaRecorder=new MediaRecorder(pcStream,options);
+  }catch(e){
+    mediaRecorder=null;
+    pcCamStatus.textContent='Erro ao iniciar gravação: '+e.message;
+    return;
+  }
+  mediaRecorder.ondataavailable=e=>{
+    if(e.data&&e.data.size>0)recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recordedChunks,{type:mediaRecorder.mimeType||'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=recordingFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    mediaRecorder=null;
+    recordedChunks=[];
+    recordStart.disabled=false;
+    recordStop.disabled=true;
+    pcCamStatus.textContent='Gravação salva';
+  };
+  mediaRecorder.start(1000);
+  recordStart.disabled=true;
+  recordStop.disabled=false;
+  pcCamStatus.textContent='Gravando câmera...';
+}
+
+function stopRecording(){
+  if(mediaRecorder&&mediaRecorder.state!=='inactive')mediaRecorder.stop();
+}
+
 async function populatePcCameraSelect(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
   const selected=localStorage.getItem(CAMERA_KEY)||pcCameraSelect.value||'';
@@ -521,6 +593,7 @@ async function populatePcCameraSelect(){
 }
 
 function stopPcCamera(){
+  stopRecording();
   pcCameraRunning=false;
   if(pcStream)pcStream.getTracks().forEach(track=>track.stop());
   pcStream=null;
@@ -655,6 +728,8 @@ fetch('puzzle-pieces-40.json').then(r=>r.json()).then(data=>{
 });
 
 startPcCameraBtn.addEventListener('click',startPcCamera);
+recordStart.addEventListener('click',startRecording);
+recordStop.addEventListener('click',stopRecording);
 pcZoom.addEventListener('input',applyPcZoom);
 pcCameraSelect.addEventListener('change',async()=>{
   localStorage.setItem(CAMERA_KEY,pcCameraSelect.value||'');
