@@ -16,6 +16,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Geo
 #camera-ghosts{position:absolute;inset:0;overflow:visible;pointer-events:none;z-index:8}
 .camera-ghost{position:absolute;left:0;top:0;display:none;filter:drop-shadow(0 0 18px rgba(244,67,54,.55));transform-origin:50% 50%;will-change:transform}
 .camera-ghost svg{display:block;width:100%;height:100%;overflow:visible}
+.camera-ghost .ghost-art{display:block;opacity:.95}
 .camera-ghost path{fill:rgba(244,67,54,.14);stroke:#f44336;stroke-width:4;stroke-dasharray:10 7}
 .camera-ghost .camera-dot{position:absolute;left:50%;top:50%;width:18px;height:18px;border:3px solid #f44336;border-radius:50%;background:rgba(255,255,255,.72);transform:translate(-50%,-50%);box-shadow:0 0 18px rgba(244,67,54,.65)}
 .camera-ghost.near{filter:drop-shadow(0 0 18px rgba(255,214,0,.55))}
@@ -180,7 +181,11 @@ function ensureGhost(piece){
   el.className='camera-ghost';
   el.style.width=px(piece.width)+'px';
   el.style.height=px(piece.height)+'px';
-  el.innerHTML=`<svg viewBox="0 0 ${piece.width} ${piece.height}" preserveAspectRatio="none"><path d="${piece.path}"></path></svg><div class="camera-dot"></div>`;
+  el.innerHTML=`<svg viewBox="0 0 ${piece.width} ${piece.height}" preserveAspectRatio="none">
+    <defs><clipPath id="ghost-clip-${piece.id}"><path d="${piece.path}"></path></clipPath></defs>
+    <image class="ghost-art" href="${IMG}" x="${piece.imageX}" y="${piece.imageY}" width="${boardData.boardWidth}" height="${boardData.boardHeight}" preserveAspectRatio="none" clip-path="url(#ghost-clip-${piece.id})"></image>
+    <path d="${piece.path}"></path>
+  </svg><div class="camera-dot"></div>`;
   cameraGhosts.appendChild(el);
   ghosts[piece.id]=el;
   return el;
