@@ -29,6 +29,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Geo
 .piece.locked{cursor:grab;filter:drop-shadow(0 3px 5px rgba(0,0,0,.14))}
 .piece.selected path.shape{stroke:#ff9800;stroke-width:4}
 .piece svg{display:block;width:100%;height:100%;overflow:visible}
+.piece .piece-art{display:none}
+.piece.camera-hidden .piece-art,.piece.locked .piece-art{display:block}
 .piece path.shape{stroke:#5f4d31;stroke-width:3;fill:rgba(255,255,255,.04)}
 .piece .rim{fill:none;stroke:rgba(255,255,255,.85);stroke-width:1.4}
 .piece .piece-num{position:absolute;left:calc(50% + 34px);top:50%;transform:translateY(-50%);font:bold 13px/1 Georgia,serif;color:#2d2416;background:rgba(255,255,255,.78);padding:2px 5px;border-radius:8px;text-shadow:0 1px 3px rgba(255,255,255,.9);pointer-events:none}
@@ -147,6 +149,7 @@ function makePiece(piece){
   el.style.zIndex=++zTop;
   el.innerHTML=`<svg viewBox="0 0 ${piece.width} ${piece.height}" preserveAspectRatio="none">
     <defs><clipPath id="clip-${piece.id}"><path d="${piece.path}"></path></clipPath></defs>
+    <image class="piece-art" href="${IMG}" x="${piece.imageX}" y="${piece.imageY}" width="${boardData.boardWidth}" height="${boardData.boardHeight}" preserveAspectRatio="none" clip-path="url(#clip-${piece.id})"></image>
     <path class="shape" d="${piece.path}" fill="transparent"></path>
     <path class="rim" d="${piece.path}"></path>
   </svg>
