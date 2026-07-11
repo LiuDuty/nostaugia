@@ -36,6 +36,10 @@ select{width:100%;border:1px solid rgba(255,255,255,.14);border-radius:12px;padd
 button.action{width:100%;border:0;border-radius:12px;padding:13px 14px;color:#07111c;background:#00d4ff;font:bold 13px/1 system-ui;cursor:pointer}
 button.secondary{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.12)}
 button.danger{background:rgba(255,90,90,.16);color:#ffb8b8;border:1px solid rgba(255,90,90,.28)}
+button.record{background:#c62828;color:#fff}
+button.stop{background:#424242;color:#fff}
+button.action:disabled{opacity:.45;cursor:not-allowed}
+.record-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;color:rgba(220,232,255,.7)}
 .metric:last-child{border-bottom:0}
 .metric b{color:#fff;font-variant-numeric:tabular-nums}
@@ -118,6 +122,15 @@ button.danger{background:rgba(255,90,90,.16);color:#ffb8b8;border:1px solid rgba
       <div class="metric"><span>Configuração</span><b id="mSaved">local</b></div>
     </div>
 
+    <h2>Gravação</h2>
+    <div class="card btns">
+      <div class="record-row">
+        <button class="action record" id="recordStart">Gravar</button>
+        <button class="action stop" id="recordStop" disabled>Parar</button>
+      </div>
+      <div class="hint">Grava o vídeo bruto da câmera selecionada. Os filtros continuam visíveis no preview ao vivo.</div>
+    </div>
+
     <div class="card btns">
       <button class="action" id="saveBtn">Salvar calibração</button>
       <button class="action secondary" id="testBtn">Testar detecção agora</button>
@@ -176,10 +189,13 @@ const zoom = document.getElementById('zoom');
 const zoomVal = document.getElementById('zoomVal');
 const zoomMode = document.getElementById('zoomMode');
 const cameraSelect = document.getElementById('cameraSelect');
+const recordStart = document.getElementById('recordStart');
+const recordStop = document.getElementById('recordStop');
 const controls = ['lightThreshold','minBright','edgeFactor','minGradient','brightness','contrast','autoEnhance','blackWhite','targetFps','cameraFps','captureScale','sendInterval','detectScreen'];
 const off = document.createElement('canvas');
 off.width = W; off.height = H;
 const offCtx = off.getContext('2d', { willReadFrequently: true });
+let mediaRecorder = null, recordedChunks = [];
 
 function loadSettings() {
   try { return Object.assign({}, defaults, JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')); }
@@ -209,12 +225,78 @@ async function populateCameraSelect() {
 }
 
 function stopCamera() {
+  stopRecording();
   running = false;
   if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
   cameraStream = null;
   cameraTrack = null;
   nativeZoom = null;
   useNativeZoom = false;
+}
+
+function recordingMimeType() {
+  const types = ['video/mp4;codecs=h264', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const type of types) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return '';
+}
+
+function recordingFileName() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const type = (mediaRecorder && mediaRecorder.mimeType) || recordingMimeType();
+  const ext = type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+  return 'calibracao-camera-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + ext;
+}
+
+function startRecording() {
+  if (!cameraStream) {
+    statusEl.textContent = 'Ligue a câmera antes de gravar';
+    return;
+  }
+  if (mediaRecorder) return;
+  if (!window.MediaRecorder) {
+    statusEl.textContent = 'Este navegador não suporta gravação';
+    return;
+  }
+  recordedChunks = [];
+  const mimeType = recordingMimeType();
+  const options = mimeType ? { mimeType } : undefined;
+  try {
+    mediaRecorder = new MediaRecorder(cameraStream, options);
+  } catch(e) {
+    mediaRecorder = null;
+    statusEl.textContent = 'Erro ao iniciar gravação: ' + e.message;
+    return;
+  }
+  mediaRecorder.ondataavailable = e => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = recordingFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    mediaRecorder = null;
+    recordedChunks = [];
+    recordStart.disabled = false;
+    recordStop.disabled = true;
+    statusEl.textContent = 'Gravação salva';
+  };
+  mediaRecorder.start(1000);
+  recordStart.disabled = true;
+  recordStop.disabled = false;
+  statusEl.textContent = 'Gravando câmera...';
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 }
 
 function resize() {
@@ -535,6 +617,8 @@ document.getElementById('saveBtn').addEventListener('click', saveSettings);
 document.getElementById('testBtn').addEventListener('click', function(){ draw(lastMarkers, lastScreen); updateMetrics(lastMarkers, lastScreen); });
 document.getElementById('detectBtn').addEventListener('click', function(){ location.href = '/detect.html'; });
 document.getElementById('resetBtn').addEventListener('click', async function(){ settings = Object.assign({}, defaults); syncControls(); saveSettings(); await applyZoom(); });
+recordStart.addEventListener('click', startRecording);
+recordStop.addEventListener('click', stopRecording);
 startBtn.addEventListener('click', startCamera);
 syncControls();
 populateCameraSelect().catch(function(){});
