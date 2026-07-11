@@ -1,0 +1,12 @@
+.firebase/
+*.log
+*.tmp
+*.temp
+*.cache
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+build/

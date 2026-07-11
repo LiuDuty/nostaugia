@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Infinite Puzzle</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#fff;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#pw{position:fixed;top:0;left:0;width:100%;height:100%;opacity:1;transition:opacity 0.8s}
+#pw.show{opacity:1}
+#castle-img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
+svg{position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+svg path{fill:rgba(255,255,255,0.92);stroke:#d8d8d8;stroke-width:1.5;cursor:pointer;pointer-events:auto;transition:fill 0.6s,stroke 0.3s}
+#flash{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at center,rgba(60,140,255,0.15),transparent 60%);pointer-events:none;opacity:0;z-index:4}
+#trackbar{position:fixed;bottom:0;left:0;right:0;z-index:5;background:rgba(0,0,0,0.7);color:#fff;font:bold 13px/1.3 Georgia,serif;padding:8px 12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;backdrop-filter:blur(4px)}
+.tb-item{padding:3px 10px;border-radius:12px;font-size:12px}
+.tb-item.g{border:1.5px solid #4caf50;color:#81c784}
+.tb-item.y{border:1.5px solid #ff9800;color:#ffb74d}
+.tb-item.r{border:1.5px solid #f44336;color:#ef5350}
+.tb-item.d{border:1.5px solid #555;color:#888}
+#aruco-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:3}
+</style>
+</head>
+<body>
+  <div id="pw" class="show">
+    <img id="castle-img" src="castelo.jpeg" alt="Castelo">
+    <svg viewBox="0 0 500 500" preserveAspectRatio="xMidYMid slice">
+      <path id="piece1" d="M 21 14 L 167 15 L 164 76 L 166 80 L 171 81 L 182 74 L 188 74 L 197 81 L 201 90 L 201 104 L 192 118 L 184 120 L 173 113 L 168 113 L 165 117 L 164 136 L 168 162 L 167 169 L 115 168 L 112 172 L 112 177 L 117 187 L 114 197 L 104 204 L 95 204 L 83 196 L 81 185 L 86 173 L 82 168 L 21 167 L 19 165 L 19 16 Z"/>
+      <path id="piece2" d="M 168 15 L 331 15 L 332 78 L 341 81 L 355 72 L 369 77 L 377 94 L 375 109 L 368 119 L 359 123 L 350 121 L 338 113 L 332 117 L 330 122 L 332 167 L 329 170 L 267 167 L 262 170 L 268 183 L 267 190 L 255 199 L 245 199 L 233 189 L 233 181 L 237 175 L 235 168 L 226 166 L 170 169 L 166 118 L 174 115 L 183 121 L 192 120 L 201 109 L 203 92 L 196 78 L 188 71 L 177 73 L 170 78 L 166 77 Z"/>
+      <path id="piece3" d="M 334 14 L 479 14 L 481 16 L 480 168 L 416 167 L 413 173 L 418 181 L 418 189 L 410 198 L 405 200 L 392 200 L 381 192 L 379 183 L 385 173 L 382 169 L 345 172 L 333 170 L 331 138 L 333 118 L 336 115 L 340 115 L 351 123 L 361 124 L 372 117 L 378 103 L 378 92 L 375 83 L 366 73 L 354 71 L 340 80 L 337 80 L 333 75 Z"/>
+      <path id="piece4" d="M 21 169 L 80 169 L 84 172 L 80 185 L 81 194 L 88 203 L 98 206 L 108 204 L 117 194 L 118 185 L 113 174 L 116 169 L 139 168 L 168 171 L 168 226 L 172 231 L 183 225 L 190 226 L 198 237 L 199 254 L 196 263 L 189 270 L 182 270 L 174 264 L 170 265 L 168 269 L 167 327 L 132 330 L 115 328 L 120 310 L 115 303 L 104 298 L 90 298 L 78 304 L 74 314 L 80 323 L 80 327 L 75 330 L 20 327 L 19 172 Z"/>
+      <path id="piece5" d="M 332 173 L 332 224 L 325 226 L 313 220 L 303 222 L 294 231 L 291 241 L 295 254 L 304 262 L 315 263 L 326 257 L 332 261 L 330 325 L 327 328 L 283 331 L 270 329 L 269 324 L 277 311 L 276 304 L 268 295 L 260 291 L 243 291 L 233 296 L 228 302 L 226 311 L 233 324 L 231 330 L 200 330 L 169 326 L 169 269 L 175 266 L 181 271 L 191 270 L 197 264 L 201 249 L 199 236 L 191 225 L 181 224 L 176 229 L 170 227 L 170 170 L 232 168 L 236 171 L 231 184 L 234 193 L 250 201 L 261 198 L 268 191 L 269 182 L 265 175 L 265 170 L 268 168 Z"/>
+      <path id="piece6" d="M 479 169 L 481 171 L 481 327 L 421 331 L 416 328 L 423 317 L 421 311 L 411 304 L 395 302 L 383 305 L 376 311 L 375 319 L 381 326 L 378 331 L 366 332 L 334 328 L 331 324 L 333 260 L 329 256 L 314 262 L 302 260 L 297 255 L 293 244 L 296 230 L 304 223 L 314 222 L 326 228 L 332 226 L 334 220 L 333 175 L 335 173 L 382 171 L 383 174 L 378 181 L 380 193 L 389 200 L 401 202 L 411 199 L 419 190 L 419 180 L 414 172 L 417 168 Z"/>
+      <path id="piece7" d="M 21 330 L 78 330 L 82 325 L 77 318 L 76 310 L 83 302 L 92 299 L 107 300 L 117 307 L 119 313 L 112 325 L 116 330 L 169 329 L 170 371 L 168 378 L 163 380 L 153 374 L 143 375 L 136 381 L 131 393 L 132 407 L 139 418 L 144 421 L 154 421 L 163 415 L 168 417 L 169 465 L 167 481 L 21 481 L 19 479 L 19 334 Z"/>
+      <path id="piece8" d="M 170 330 L 188 329 L 212 332 L 233 330 L 235 324 L 228 314 L 228 306 L 236 296 L 245 292 L 263 294 L 274 303 L 275 313 L 267 326 L 271 331 L 329 329 L 328 378 L 330 382 L 337 383 L 344 378 L 354 376 L 360 378 L 367 385 L 371 395 L 369 409 L 360 419 L 351 421 L 337 414 L 332 414 L 328 418 L 330 480 L 170 481 L 170 418 L 168 415 L 162 414 L 155 419 L 145 420 L 136 413 L 132 402 L 134 387 L 142 377 L 151 375 L 164 382 L 170 377 L 172 372 Z"/>
+    </svg>
+  </div>
+<div id="flash"></div>
+<canvas id="aruco-canvas"></canvas>
+<div id="trackbar">📷 aguardando celular...</div>
+
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",
+  authDomain: "infinitepuzze.firebaseapp.com",
+  projectId: "infinitepuzze",
+  storageBucket: "infinitepuzze.firebasestorage.app",
+  messagingSenderId: "65481405676",
+  appId: "1:65481405676:web:96952f779fa779ef9d21c9"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+const flash=document.getElementById('flash');
+const trackbar=document.getElementById('trackbar');
+let total=0,revealedCount=0;
+
+function reveal(p){
+  const piece=document.getElementById('piece'+p);
+  if(!piece||piece.dataset.done)return;
+  piece.dataset.done='1';
+  piece.style.fill='transparent';
+  revealedCount++;
+  flash.style.opacity='1';setTimeout(()=>flash.style.opacity='0',200);
+}
+
+function hide(p){
+  const piece=document.getElementById('piece'+p);
+  if(!piece||!piece.dataset.done)return;
+  delete piece.dataset.done;
+  piece.style.fill='';
+  revealedCount--;
+}
+
+function toggle(p){
+  const piece=document.getElementById('piece'+p);
+  if(!piece)return;
+  if(piece.dataset.done)hide(p);else reveal(p);
+}
+
+function resetAll(){
+  revealedCount=0;
+  document.querySelectorAll('svg path').forEach(el=>{el.style.fill='';delete el.dataset.done});
+}
+
+function applyPieceRect(data){
+  let el=document.getElementById('pw');
+  if(data.pw&&data.ph){
+    el.style.left=(data.px*100)+'vw';
+    el.style.top=(data.py*100)+'vh';
+    el.style.width=(data.pw*100)+'vw';
+    el.style.height=(data.ph*100)+'vh';
+  }
+  if(data.pieces&&data.pieces.length>0)total=data.pieces.length;
+  resetAll();
+}
+
+// piece stroke colors based on score
+const TRACK_COLORS={g:'#4caf50',y:'#ff9800',r:'#f44336',d:'#d8d8d8'};
+function updatePieceTrack(pieceIdx,score){
+  const el=document.getElementById('piece'+pieceIdx);
+  if(!el)return;
+  let cls='d';
+  if(score>=80)cls='g';else if(score>=50)cls='y';else if(score>0)cls='r';
+  el.style.stroke=TRACK_COLORS[cls];
+  el.style.strokeWidth=score>0?'3':'1.5';
+}
+
+// ArUco overlay canvas
+const ac=document.getElementById('aruco-canvas'),ax=ac.getContext('2d');
+function resizeAruco(){ac.width=innerWidth;ac.height=innerHeight}
+resizeAruco();addEventListener('resize',resizeAruco);
+
+// Listen to tracking state from phone (real-time)
+db.collection('tracking').doc('state').onSnapshot(doc=>{
+  ax.clearRect(0,0,ac.width,ac.height);
+  if(!doc.exists){trackbar.innerHTML='📷 aguardando celular...';return}
+  const data=doc.data();
+  if(!data||!data.markers){trackbar.innerHTML='📷 sem dados de rastreio';return}
+  const mk=data.markers;
+  const W=640,H=480,sw=ac.width/W,sh=ac.height/H;
+  const parts=[];
+
+  for(let key in mk){
+    const m=mk[key];
+    const pieceIdx=parseInt(key.replace('m',''))+1;
+    updatePieceTrack(pieceIdx,m.score);
+    let cls='d';
+    if(m.score>=80)cls='g';else if(m.score>=50)cls='y';else if(m.score>0)cls='r';
+    parts.push('<span class="tb-item '+cls+'">P'+pieceIdx+': '+m.score+'%</span>');
+
+    // draw marker overlay if corners available
+    if(m.corners&&m.corners.length===4){
+      const pts=m.corners.map(c=>{const s=c.split(',');return {x:parseFloat(s[0])*sw,y:parseFloat(s[1])*sh}});
+      // green quad
+      ax.strokeStyle='rgba(60,220,120,0.9)';ax.lineWidth=3;
+      ax.beginPath();ax.moveTo(pts[0].x,pts[0].y);
+      for(let i=1;i<4;i++)ax.lineTo(pts[i].x,pts[i].y);
+      ax.closePath();ax.stroke();
+      // yellow corner dots
+      for(let i=0;i<4;i++){ax.fillStyle='rgba(255,220,60,0.9)';ax.beginPath();ax.arc(pts[i].x,pts[i].y,6,0,Math.PI*2);ax.fill()}
+      // centroid + crosshair
+      const cx2=(pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4,cy2=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4;
+      ax.strokeStyle='rgba(255,60,60,0.4)';ax.lineWidth=4;ax.beginPath();ax.arc(cx2,cy2,28,0,Math.PI*2);ax.stroke();
+      ax.strokeStyle='rgba(255,220,60,0.8)';ax.lineWidth=2;
+      ax.beginPath();ax.moveTo(cx2-16,cy2);ax.lineTo(cx2+16,cy2);ax.moveTo(cx2,cy2-16);ax.lineTo(cx2,cy2+16);ax.stroke();
+      // ID label
+      ax.fillStyle='rgba(60,220,120,0.95)';ax.font='bold 20px Georgia';ax.textAlign='center';ax.textBaseline='bottom';
+      ax.fillText('ID:'+(pieceIdx-1)+' hd:-',cx2,cy2-32);
+      // score below
+      ax.fillStyle='#fff';ax.font='bold 14px Georgia';ax.textBaseline='top';
+      ax.fillText(m.score+'%',cx2,cy2+38);
+    }
+  }
+  // pieces not tracked → restore default stroke
+  for(let i=1;i<=8;i++){
+    const key='m'+(i-1);
+    if(!(key in mk))updatePieceTrack(i,0);
+  }
+  trackbar.innerHTML='📷 '+parts.join(' ');
+});
+
+// Listen for clicks from Firestore
+db.collection('clicks').orderBy('timestamp','desc').limit(1).onSnapshot(snap=>{
+  snap.forEach(doc=>{
+    let data=doc.data();
+    let p=parseInt(data.piece);
+    if(p===0){applyPieceRect(data)}
+    else if(p<0)hide(-p);
+    else if(p>0)toggle(p);
+  });
+});
+
+// Manual click on PC
+document.querySelectorAll('svg path').forEach((el,i)=>{
+  el.addEventListener('click',e=>{e.preventDefault();toggle(i+1)});
+  el.addEventListener('touchstart',e=>{e.preventDefault();toggle(i+1)});
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Infinite Puzzle 40 Ghost2</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#f4f1e9;font-family:Georgia,serif;touch-action:none;user-select:none}
+#app{position:fixed;inset:0;background:radial-gradient(circle at 50% 45%,#fff 0,#f3efe5 48%,#ded6c3 100%)}
+#board{position:absolute;left:50%;top:50%;width:min(86vw,calc(78vh * 1.6));aspect-ratio:8/5;transform:translate(-50%,-50%);box-shadow:0 22px 70px rgba(45,35,20,.22);border:10px solid #fff;background:#fff;overflow:visible}
+#board img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
+#cover{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#cover path{fill:rgba(255,255,255,.96);stroke:rgba(120,110,95,.28);stroke-width:1.2;transition:opacity .25s}
+#cover text{font:bold 18px Georgia,serif;fill:rgba(80,65,40,.48);paint-order:stroke;stroke:rgba(255,255,255,.75);stroke-width:4;text-anchor:middle;dominant-baseline:middle;pointer-events:none}
+#camera-ghosts{position:absolute;inset:0;overflow:visible;pointer-events:none;z-index:8}
+.camera-ghost{position:absolute;left:0;top:0;display:none;filter:drop-shadow(0 0 18px rgba(255,152,0,.55));transform-origin:50% 50%;will-change:transform}
+.camera-ghost svg{display:block;width:100%;height:100%;overflow:visible}
+.camera-ghost path{fill:rgba(255,152,0,.16);stroke:#ff9800;stroke-width:4;stroke-dasharray:10 7}
+.camera-ghost .camera-dot{position:absolute;left:50%;top:50%;width:18px;height:18px;border:3px solid #ff9800;border-radius:50%;background:rgba(255,255,255,.72);transform:translate(-50%,-50%);box-shadow:0 0 18px rgba(255,152,0,.65)}
+.camera-ghost.ok path{fill:rgba(76,175,80,.18);stroke:#4caf50;stroke-dasharray:none}
+.camera-ghost.ok .camera-dot{border-color:#4caf50;box-shadow:0 0 18px rgba(76,175,80,.7)}
+#pieces{position:absolute;inset:0;overflow:visible}
+.piece{position:absolute;left:0;top:0;cursor:grab;touch-action:none;filter:drop-shadow(0 10px 16px rgba(0,0,0,.25));transform-origin:50% 50%;will-change:transform}
+.piece.dragging{cursor:grabbing;filter:drop-shadow(0 18px 28px rgba(0,0,0,.34))}
+.piece.locked{cursor:grab;filter:drop-shadow(0 3px 5px rgba(0,0,0,.14))}
+.piece.selected path.shape{stroke:#ff9800;stroke-width:4}
+.piece svg{display:block;width:100%;height:100%;overflow:visible}
+.piece path.shape{stroke:#5f4d31;stroke-width:3;fill:rgba(255,255,255,.04)}
+.piece .rim{fill:none;stroke:rgba(255,255,255,.85);stroke-width:1.4}
+.piece .piece-num{position:absolute;left:calc(50% + 34px);top:50%;transform:translateY(-50%);font:bold 13px/1 Georgia,serif;color:#2d2416;background:rgba(255,255,255,.78);padding:2px 5px;border-radius:8px;text-shadow:0 1px 3px rgba(255,255,255,.9);pointer-events:none}
+.piece .aruco-marker{position:absolute;left:50%;top:50%;width:48px;height:48px;transform:translate(-50%,-50%);background:#fff;border:4px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none}
+.piece .aruco-marker svg{display:block;width:100%;height:100%}
+.piece .aruco-id{position:absolute;left:calc(50% + 34px);top:calc(50% + 17px);font:bold 8px/1 system-ui;color:#111;background:rgba(255,255,255,.78);padding:1px 4px;border-radius:5px;pointer-events:none}
+.piece.camera-hidden .piece-num,.piece.camera-hidden .aruco-marker,.piece.camera-hidden .aruco-id,.piece.locked .piece-num,.piece.locked .aruco-marker,.piece.locked .aruco-id{display:none}
+#hud{position:fixed;left:16px;top:16px;z-index:20;background:rgba(255,255,255,.88);border:1px solid rgba(0,0,0,.12);border-radius:14px;padding:10px 14px;color:#3b3325;font:bold 14px/1.4 Georgia,serif;box-shadow:0 8px 28px rgba(0,0,0,.12);backdrop-filter:blur(8px)}
+#hud small{display:block;font:12px/1.35 system-ui;color:#6f6657;margin-top:2px}
+#camstat{display:block;margin-top:4px;font:12px/1.35 system-ui;color:#795548}
+#actions{position:fixed;right:16px;top:16px;z-index:20;display:flex;flex-direction:column;gap:10px;align-items:flex-end}
+#actions button{border:0;border-radius:999px;padding:12px 18px;background:#2d2416;color:#fff;font:bold 13px Georgia,serif;box-shadow:0 8px 28px rgba(0,0,0,.2);cursor:pointer}
+#actions button.test{background:#795548}
+#actions button:active{transform:translateY(1px)}
+#rotbar{position:fixed;right:16px;bottom:16px;z-index:20;display:flex;gap:10px;background:rgba(255,255,255,.88);border:1px solid rgba(0,0,0,.12);border-radius:999px;padding:8px;box-shadow:0 8px 28px rgba(0,0,0,.16);backdrop-filter:blur(8px)}
+#rotbar button{width:52px;height:52px;border:0;border-radius:50%;background:#2d2416;color:#fff;font:bold 24px/1 Georgia,serif;cursor:pointer}
+#rotbar button:active{transform:scale(.96)}
+#toast{position:fixed;left:50%;bottom:22px;z-index:30;transform:translateX(-50%);padding:10px 18px;border-radius:999px;background:rgba(45,36,22,.9);color:#fff;font:bold 13px Georgia,serif;opacity:0;transition:opacity .18s;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="board">
+    <img src="castelo.jpeg" alt="Castelo">
+    <svg id="cover" viewBox="0 0 800 500" preserveAspectRatio="none"></svg>
+    <div id="camera-ghosts"></div>
+    <div id="pieces"></div>
+  </div>
+</div>
+<div id="hud">Puzzle 40 Ghost2 <span id="count">0/40</span><small>Câmera controla as 40 peças. Ghost laranja=fora, verde=correto.</small><span id="camstat">📷 aguardando câmera...</span></div>
+<div id="actions"><button id="shuffle">Misturar</button><button id="moveLeft" class="test">Peças à esquerda</button><button id="placeAll" class="test">Colocar todas</button></div>
+<div id="rotbar"><button id="rotL" title="Girar esquerda">↺</button><button id="rotR" title="Girar direita">↻</button></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<script>
+const IMG='castelo.jpeg';
+const firebaseConfig={apiKey:"AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",authDomain:"infinitepuzze.firebaseapp.com",projectId:"infinitepuzze",storageBucket:"infinitepuzze.firebasestorage.app",messagingSenderId:"65481405676",appId:"1:65481405676:web:96952f779fa779ef9d21c9"};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.firestore();
+const POS_TOL=58;
+const ROT_TOL=24;
+const ROT_STEP=45;
+let boardData=null,scale=1,zTop=10,placed=0,selectedPiece=null;
+const cameraRevealed=new Set();
+const board=document.getElementById('board');
+const cover=document.getElementById('cover');
+const cameraGhosts=document.getElementById('camera-ghosts');
+const piecesLayer=document.getElementById('pieces');
+const count=document.getElementById('count');
+const toast=document.getElementById('toast');
+const camstat=document.getElementById('camstat');
+let arucoDict=null;
+const ghosts={};
+
+function showToast(t){toast.textContent=t;toast.style.opacity='1';clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.style.opacity='0',900)}
+function normDeg(v){v%=360;if(v<0)v+=360;return v}
+function rotDiff(a,b){let d=Math.abs(normDeg(a)-normDeg(b));return Math.min(d,360-d)}
+function boardRect(){return board.getBoundingClientRect()}
+function updateScale(){scale=board.clientWidth/boardData.boardWidth}
+function px(v){return v*scale}
+function renderTransform(el){const s=el.state;el.style.transform=`translate(${s.x}px,${s.y}px) rotate(${s.r}deg)`}
+function updateCount(){count.textContent=document.querySelectorAll('#cover path[style*="opacity: 0"]').length+'/40'}
+function selectPiece(el){
+  if(selectedPiece)selectedPiece.classList.remove('selected');
+  selectedPiece=el;
+  if(el)el.classList.add('selected');
+}
+function rotatePiece(el,delta){
+  if(!el)return;
+  if(el.state.locked)unlockPiece(el);
+  el.state.r=normDeg(el.state.r+delta);
+  el.style.zIndex=++zTop;
+  renderTransform(el);
+}
+
+function makePiece(piece){
+  const coverPath=document.createElementNS('http://www.w3.org/2000/svg','path');
+  coverPath.setAttribute('id','cover-'+piece.id);
+  coverPath.setAttribute('d',piece.coverPath);
+  cover.appendChild(coverPath);
+
+  const el=document.createElement('div');
+  el.className='piece';
+  el.dataset.id=piece.id;
+  el.style.width=px(piece.width)+'px';
+  el.style.height=px(piece.height)+'px';
+  el.style.zIndex=++zTop;
+  el.innerHTML=`<svg viewBox="0 0 ${piece.width} ${piece.height}" preserveAspectRatio="none">
+    <defs><clipPath id="clip-${piece.id}"><path d="${piece.path}"></path></clipPath></defs>
+    <path class="shape" d="${piece.path}" fill="transparent"></path>
+    <path class="rim" d="${piece.path}"></path>
+  </svg>
+  <div class="piece-num">${piece.id}</div>
+  <div class="aruco-marker">${arucoDict ? arucoDict.generateSVG(piece.id-1) : ''}</div>
+  <div class="aruco-id">A${piece.id-1}</div>`;
+  el.piece=piece;
+  el.state={x:0,y:0,r:0,locked:false,dragging:false,dx:0,dy:0,moved:false};
+  piecesLayer.appendChild(el);
+  attachPiece(el,coverPath);
+  return el;
+}
+
+function addBoardLabels(){
+  boardData.pieces.forEach(piece=>{
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('id','label-'+piece.id);
+    t.setAttribute('x',piece.cellX+(boardData.boardWidth/boardData.cols)/2);
+    t.setAttribute('y',piece.cellY+(boardData.boardHeight/boardData.rows)/2);
+    t.textContent=piece.id;
+    cover.appendChild(t);
+  });
+}
+
+function ensureGhost(piece){
+  if(ghosts[piece.id])return ghosts[piece.id];
+  const el=document.createElement('div');
+  el.className='camera-ghost';
+  el.style.width=px(piece.width)+'px';
+  el.style.height=px(piece.height)+'px';
+  el.innerHTML=`<svg viewBox="0 0 ${piece.width} ${piece.height}" preserveAspectRatio="none"><path d="${piece.path}"></path></svg><div class="camera-dot"></div>`;
+  cameraGhosts.appendChild(el);
+  ghosts[piece.id]=el;
+  return el;
+}
+
+function updateCameraGhost(piece,center,hit,angle=0){
+  const el=ensureGhost(piece);
+  el.style.display='block';
+  el.style.width=px(piece.width)+'px';
+  el.style.height=px(piece.height)+'px';
+  const x=center.x*boardData.boardWidth;
+  const y=center.y*boardData.boardHeight;
+  const gx=px(x-piece.width/2);
+  const gy=px(y-piece.height/2);
+  el.style.transform=`translate(${gx}px,${gy}px) rotate(${angle}deg)`;
+  el.classList.toggle('ok',!!hit);
+}
+
+function hideCameraGhost(pieceId){
+  const el=ghosts[pieceId];
+  if(el)el.style.display='none';
+}
+
+function randomize(el){
+  const p=el.piece,br=boardRect();
+  const areaW=br.width,areaH=br.height;
+  const marginX=areaW*0.38,marginY=areaH*0.42;
+  el.classList.remove('locked');
+  el.classList.remove('camera-hidden');
+  el.state.locked=false;
+  cameraRevealed.delete(p.id);
+  document.getElementById('cover-'+p.id).style.opacity='1';
+  const labelEl=document.getElementById('label-'+p.id);
+  if(labelEl)labelEl.style.opacity='1';
+  el.style.display='block';
+  el.state.x=-marginX+Math.random()*(areaW+marginX*2-px(p.width));
+  el.state.y=-marginY+Math.random()*(areaH+marginY*2-px(p.height));
+  el.state.r=Math.floor(Math.random()*(360/ROT_STEP))*ROT_STEP;
+  renderTransform(el);
+}
+
+function lockPiece(el){
+  const p=el.piece;
+  if(!el.state.locked)placed++;
+  el.state.locked=true;
+  el.classList.add('locked');
+  el.state.x=px(p.targetX);
+  el.state.y=px(p.targetY);
+  el.state.r=0;
+  el.style.zIndex=2;
+  const coverEl=document.getElementById('cover-'+p.id);
+  coverEl.style.opacity='0';
+  const labelEl=document.getElementById('label-'+p.id);
+  if(labelEl)labelEl.style.opacity='0';
+  renderTransform(el);
+  updateCount();
+  showToast('Peça '+p.id+' encaixou');
+}
+
+function unlockPiece(el){
+  const p=el.piece;
+  if(el.state.locked)placed--;
+  el.state.locked=false;
+  el.classList.remove('locked');
+  el.classList.remove('camera-hidden');
+  el.style.zIndex=++zTop;
+  if(!cameraRevealed.has(p.id))document.getElementById('cover-'+p.id).style.opacity='1';
+  const labelEl=document.getElementById('label-'+p.id);
+  if(labelEl)labelEl.style.opacity='1';
+  updateCount();
+}
+
+function trySnap(el,feedback=false){
+  const p=el.piece,s=el.state;
+  const dx=s.x-px(p.targetX),dy=s.y-px(p.targetY);
+  const dist=Math.hypot(dx,dy);
+  const rd=rotDiff(s.r,0);
+  if(dist<=POS_TOL&&rd<=ROT_TOL){lockPiece(el);return true}
+  if(feedback&&dist<=POS_TOL*1.8){
+    if(rd>ROT_TOL)showToast('Quase: gire a peça ('+Math.round(rd)+'°)');
+    else showToast('Quase: aproxime mais ('+Math.round(dist)+'px)');
+  }
+  return false;
+}
+
+function attachPiece(el){
+  el.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    if(el.state.locked)unlockPiece(el);
+    selectPiece(el);
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging');
+    el.style.zIndex=++zTop;
+    el.state.dragging=true;el.state.moved=false;
+    el.state.dx=e.clientX-el.state.x;el.state.dy=e.clientY-el.state.y;
+  });
+  el.addEventListener('pointermove',e=>{
+    if(!el.state.dragging)return;
+    e.preventDefault();
+    el.state.x=e.clientX-el.state.dx;el.state.y=e.clientY-el.state.dy;el.state.moved=true;
+    renderTransform(el);
+  });
+  el.addEventListener('pointerup',e=>{
+    if(!el.state.dragging)return;
+    el.state.dragging=false;el.classList.remove('dragging');
+  });
+  el.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    selectPiece(el);
+    rotatePiece(el,ROT_STEP);
+  });
+  el.addEventListener('wheel',e=>{
+    e.preventDefault();
+    selectPiece(el);
+    rotatePiece(el,e.deltaY>0?ROT_STEP:-ROT_STEP);
+  },{passive:false});
+}
+
+function shuffleAll(){
+  placed=0;
+  cameraRevealed.clear();
+  document.querySelectorAll('.piece').forEach(randomize);
+  updateCount();
+}
+
+function placeAllForTest(){
+  placed=0;
+  cameraRevealed.clear();
+  document.querySelectorAll('.piece').forEach(el=>{
+    el.state.locked=false;
+    lockPiece(el);
+  });
+  showToast('Todas as peças foram colocadas');
+}
+
+function moveAllPiecesLeft(){
+  placed=0;
+  cameraRevealed.clear();
+  const gap=18;
+  const startX=-board.clientWidth*0.46;
+  const startY=10;
+  const colW=px(92);
+  const rowH=px(78);
+  document.querySelectorAll('.piece').forEach((el,i)=>{
+    const p=el.piece;
+    el.classList.remove('locked');
+    el.state.locked=false;
+    document.getElementById('cover-'+p.id).style.opacity='1';
+    hideCameraGhost(p.id);
+    el.style.display='block';
+    el.style.zIndex=++zTop;
+    el.state.x=startX-(i%3)*(colW+gap);
+    el.state.y=startY+Math.floor(i/3)*rowH;
+    el.state.r=0;
+    renderTransform(el);
+  });
+  updateCount();
+  showToast('Peças movidas para a esquerda');
+}
+
+function setCameraReveal(pieceId,on){
+  const coverEl=document.getElementById('cover-'+pieceId);
+  if(!coverEl)return;
+  const el=document.querySelector('.piece[data-id="'+pieceId+'"]');
+  if(on){
+    cameraRevealed.add(pieceId);
+    coverEl.style.opacity='0';
+    if(el)el.classList.add('camera-hidden');
+    const labelEl=document.getElementById('label-'+pieceId);
+    if(labelEl)labelEl.style.opacity='0';
+  }else{
+    cameraRevealed.delete(pieceId);
+    if(el)el.classList.remove('camera-hidden');
+    if(!el||!el.state.locked)coverEl.style.opacity='1';
+    const labelEl=document.getElementById('label-'+pieceId);
+    if(labelEl)labelEl.style.opacity='1';
+  }
+}
+
+function markerPose(marker){
+  if(!marker.corners||marker.corners.length!==4)return null;
+  let sx=0,sy=0;
+  const pts=[];
+  for(const c of marker.corners){
+    const parts=c.split(',');
+    const p={x:parseFloat(parts[0]),y:parseFloat(parts[1])};
+    pts.push(p);sx+=p.x;sy+=p.y;
+  }
+  const angle=Math.atan2(pts[1].y-pts[0].y,pts[1].x-pts[0].x)*180/Math.PI;
+  return {x:(sx/4)/640,y:(sy/4)/480,angle};
+}
+
+function screenAngle(screen){
+  if(!screen||!screen.c1||!screen.c2)return 0;
+  return Math.atan2(screen.c2.y-screen.c1.y,screen.c2.x-screen.c1.x)*180/Math.PI;
+}
+
+function normalizeToDetectedScreen(pt,screen){
+  // detect.html envia c1..c4 normalizados no frame da câmera.
+  // Aqui convertemos o centro do ArUco para coordenadas 0..1 dentro da tela do notebook.
+  if(!screen||!screen.detected||!screen.c1||!screen.c2||!screen.c3||!screen.c4)return pt;
+  const xs=[screen.c1.x,screen.c2.x,screen.c3.x,screen.c4.x];
+  const ys=[screen.c1.y,screen.c2.y,screen.c3.y,screen.c4.y];
+  const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
+  if(right-left<0.05||bottom-top<0.05)return pt;
+  return {x:(pt.x-left)/(right-left),y:(pt.y-top)/(bottom-top)};
+}
+
+function pieceHit(piece,pt){
+  const bx=pt.x*boardData.boardWidth;
+  const by=pt.y*boardData.boardHeight;
+  const padX=(boardData.boardWidth/boardData.cols)*0.18;
+  const padY=(boardData.boardHeight/boardData.rows)*0.18;
+  const x0=piece.cellX-padX;
+  const y0=piece.cellY-padY;
+  const x1=piece.cellX+(boardData.boardWidth/boardData.cols)+padX;
+  const y1=piece.cellY+(boardData.boardHeight/boardData.rows)+padY;
+  return bx>=x0&&bx<=x1&&by>=y0&&by<=y1;
+}
+
+function startCameraTracking(){
+  db.collection('tracking').doc('state').onSnapshot(doc=>{
+    if(!boardData||!doc.exists)return;
+    const data=doc.data();
+    const seen=new Set();
+    const markers=(data&&data.markers)||{};
+    let debug=[];
+    const visibleGhosts=new Set();
+    for(const key in markers){
+      const arucoId=parseInt(key.replace('m',''));
+      const pieceId=arucoId+1;
+      if(pieceId<1||pieceId>40)continue;
+      const piece=boardData.pieces[pieceId-1];
+      const raw=markerPose(markers[key]);
+      const center=raw?normalizeToDetectedScreen(raw,data.center):null;
+      const angle=raw?raw.angle-screenAngle(data.center):0;
+      const hit=!!(center&&pieceHit(piece,center));
+      if(center){updateCameraGhost(piece,center,hit,angle);visibleGhosts.add(pieceId)}
+      if(center)debug.push('A'+arucoId+'→P'+pieceId+' '+Math.round(center.x*100)+'%, '+Math.round(center.y*100)+'% '+Math.round(angle)+'° '+(hit?'OK':'fora'));
+      if(hit){
+        seen.add(pieceId);
+        setCameraReveal(pieceId,true);
+      }
+    }
+    for(let i=1;i<=40;i++){
+      if(cameraRevealed.has(i)&&!seen.has(i))setCameraReveal(i,false);
+    }
+    for(let i=1;i<=40;i++)if(!visibleGhosts.has(i))hideCameraGhost(i);
+    updateCount();
+    camstat.textContent=debug.length?'📷 '+debug.slice(0,3).join(' | '):'📷 sem ArUco válido';
+  });
+}
+
+function rebuildSizes(){
+  if(!boardData)return;
+  updateScale();
+  document.querySelectorAll('.piece').forEach(el=>{
+    const p=el.piece;
+    el.style.width=px(p.width)+'px';el.style.height=px(p.height)+'px';
+    if(el.state.locked){el.state.x=px(p.targetX);el.state.y=px(p.targetY)}
+    renderTransform(el);
+  });
+}
+
+fetch('puzzle-pieces-40.json').then(r=>r.json()).then(data=>{
+  if(window.AR)arucoDict=new AR.Dictionary('ARUCO');
+  boardData=data;updateScale();
+  data.pieces.forEach(makePiece);
+  addBoardLabels();
+  shuffleAll();
+  startCameraTracking();
+});
+
+document.getElementById('shuffle').addEventListener('click',shuffleAll);
+document.getElementById('moveLeft').addEventListener('click',moveAllPiecesLeft);
+document.getElementById('placeAll').addEventListener('click',placeAllForTest);
+document.getElementById('rotL').addEventListener('click',()=>rotatePiece(selectedPiece,-ROT_STEP));
+document.getElementById('rotR').addEventListener('click',()=>rotatePiece(selectedPiece,ROT_STEP));
+addEventListener('keydown',e=>{
+  if(e.key==='q'||e.key==='Q')rotatePiece(selectedPiece,-ROT_STEP);
+  if(e.key==='e'||e.key==='E'||e.key==='r'||e.key==='R')rotatePiece(selectedPiece,ROT_STEP);
+});
+addEventListener('resize',rebuildSizes);
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Peças A4</title>
+<style>
+@page{size:A4;margin:10mm}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#111;font-family:Arial,sans-serif}
+.page{width:190mm;min-height:277mm;page-break-after:always;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(5,1fr);gap:7mm;padding:0}
+.slot{border:0.25mm dashed #aaa;position:relative;display:flex;align-items:center;justify-content:center;padding:2mm;break-inside:avoid}
+.piece-wrap{position:relative;width:34mm;height:34mm;display:flex;align-items:center;justify-content:center}
+.piece-svg{position:absolute;left:50%;top:50%;width:32mm;height:32mm;transform:translate(-50%,-50%);overflow:visible}
+.piece-svg path{fill:rgba(255,255,255,.03);stroke:#222;stroke-width:2.4;vector-effect:non-scaling-stroke}
+.marker{position:absolute;left:50%;top:50%;width:8.5mm;height:8.5mm;transform:translate(-50%,-50%);background:#fff;border:.8mm solid #fff}
+.marker svg{width:8.5mm!important;height:8.5mm!important;display:block}
+.label{position:absolute;left:calc(50% + 6mm);top:calc(50% - 3mm);font:bold 6pt Arial,sans-serif;background:#fff;padding:.6mm 1mm;border-radius:1.5mm}
+.aid{position:absolute;left:calc(50% + 6mm);top:calc(50% + 4mm);font:bold 5pt Arial,sans-serif;background:#fff;padding:.5mm .9mm;border-radius:1.2mm}
+</style>
+</head>
+<body>
+<div id="pages"></div>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<script>
+const pages=document.getElementById('pages');
+const dict=new AR.Dictionary('ARUCO');
+fetch('puzzle-pieces-40.json').then(r=>r.json()).then(data=>{
+  for(let page=0;page<2;page++){
+    const section=document.createElement('section');section.className='page';
+    for(let j=0;j<20;j++){
+      const idx=page*20+j;
+      const slot=document.createElement('div');slot.className='slot';
+      if(idx<data.pieces.length){
+        const p=data.pieces[idx];
+        slot.innerHTML=`<div class="piece-wrap">
+          <svg class="piece-svg" viewBox="0 0 ${p.width} ${p.height}" preserveAspectRatio="xMidYMid meet"><path d="${p.path}"></path></svg>
+          <div class="marker">${dict.generateSVG(idx)}</div>
+          <div class="label">Peça ${idx+1}</div>
+          <div class="aid">A${idx}</div>
+        </div>`;
+      }
+      section.appendChild(slot);
+    }
+    pages.appendChild(section);
+  }
+});
+</script>
+</body>
+</html>

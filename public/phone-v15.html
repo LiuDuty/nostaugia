@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
+<title>Segue ArUco</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#fff;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#cam{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+#cv{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#status{position:fixed;top:5%;left:10%;right:10%;text-align:center;pointer-events:none;z-index:5;color:#fff;font:bold 14px/1.4 Georgia,serif;text-shadow:0 0 20px rgba(0,0,0,0.8);transition:opacity 0.5s;background:rgba(0,0,0,0.6);padding:8px 16px;border-radius:16px}
+#flipbtn{position:fixed;bottom:5%;right:5%;z-index:10;color:rgba(255,255,255,0.5);font:bold 13px/1 Georgia,serif;cursor:pointer;background:rgba(0,0,0,0.4);padding:10px 16px;border-radius:20px;border:1px solid rgba(255,255,255,0.15);-webkit-tap-highlight-color:transparent}
+#camstart{position:fixed;top:0;left:0;width:100%;height:100%;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0e1a;color:#fff;font:18px/1.6 Georgia,serif;text-align:center;gap:20px;padding:30px}
+/* #markers removed */
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="cv"></canvas>
+<div id="status">Iniciando...</div>
+<div id="flipbtn" onclick="flipped=!flipped;document.getElementById('cam').style.transform=flipped?'rotate(180deg)':'';document.getElementById('cv').style.transform=flipped?'rotate(180deg)':''">↻ virar</div>
+<div id="camstart">
+  <div style="font-size:50px">🎯</div>
+  <div id="camstatus">Toque para ligar a câmera</div>
+  <button id="startcambtn" onclick="var el=document.getElementById('camstatus');el.textContent='▶▶';try{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)el.textContent='❌ sem câmera';else navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:640},height:{ideal:480}}}).then(function(s){cam.srcObject=s;cam.play();document.getElementById('camstart').style.display='none';setTimeout(loop,500)}).catch(function(e){el.textContent='❌ '+e.message})}catch(e){el.textContent='❌ '+e.message}" style="padding:22px 60px;border:none;border-radius:40px;background:rgba(60,200,255,0.95);color:#000;font:bold 22px/1 Georgia,serif;cursor:pointer;box-shadow:0 4px 30px rgba(0,0,0,0.5);-webkit-tap-highlight-color:transparent">▶ LIGAR CÂMERA</button>
+  <div style="font-size:13px;color:rgba(255,255,255,0.4)">O Chrome pede permissão após o toque</div>
+</div>
+<div id="snapbtn" onclick="capturar()" style="position:fixed;bottom:8%;left:50%;transform:translateX(-50%);z-index:15;width:70px;height:70px;border-radius:50%;background:rgba(255,255,255,0.85);border:4px solid rgba(255,255,255,0.5);box-shadow:0 2px 20px rgba(0,0,0,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:28px;color:#333;-webkit-tap-highlight-color:transparent">📸</div>
+<div id="captura" style="position:fixed;top:10px;right:10px;z-index:12;width:120px;height:90px;border:2px solid rgba(255,255,255,0.5);border-radius:8px;overflow:hidden;display:none;background:#fff;box-shadow:0 2px 20px rgba(0,0,0,0.5)">
+  <canvas id="thumb" width="160" height="120" style="width:100%;height:100%"></canvas>
+  <div id="matchStatus" style="position:absolute;bottom:2px;left:2px;right:2px;text-align:center;font:bold 11px/1.2 Georgia,serif;color:#fff;text-shadow:0 0 6px rgba(0,0,0,0.9);background:rgba(0,0,0,0.4);border-radius:4px;padding:2px">—</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<script>
+var W=640,H=480,cam=document.getElementById('cam'),cv=document.getElementById('cv'),cx=cv.getContext('2d'),st=document.getElementById('status'),flipped=false;
+var off=document.createElement('canvas');off.width=W;off.height=H;var ctx=off.getContext('2d');
+var thumb=document.getElementById('thumb'),tc=thumb.getContext('2d');
+var capturaDiv=document.getElementById('captura'),matchDiv=document.getElementById('matchStatus');
+function resize(){cv.width=innerWidth;cv.height=innerHeight}
+resize();addEventListener('resize',resize);
+function snap(){if(flipped){ctx.save();ctx.translate(W/2,H/2);ctx.rotate(Math.PI);ctx.drawImage(cam,-W/2,-H/2,W,H);ctx.restore()}else ctx.drawImage(cam,0,0,W,H)}
+document.getElementById('camstatus').textContent='Toque para ligar a câmera';
+
+// Firebase
+firebase.initializeApp({apiKey:"AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",authDomain:"infinitepuzze.firebaseapp.com",projectId:"infinitepuzze",storageBucket:"infinitepuzze.firebasestorage.app",messagingSenderId:"65481405676",appId:"1:65481405676:web:96952f779fa779ef9d21c9"});
+var db=firebase.firestore();
+
+var detector=new AR.Detector({dictionaryName:'ARUCO'});
+var captured=null;
+var pieceSent={};
+var lastTrackTs=0;
+
+function firePiece(id,reveal){
+  var p=id+1; // marker ID 0-3 → piece 1-4
+  if(reveal&&pieceSent[p]==='on')return;
+  if(!reveal&&pieceSent[p]!=='on')return;
+  db.collection('clicks').add({piece:reveal?p:-p,timestamp:firebase.firestore.FieldValue.serverTimestamp()});
+  pieceSent[p]=reveal?'on':'off';
+}
+
+function capturar(){
+  snap();
+  var imageData=ctx.getImageData(0,0,W,H);
+  var markers=detector.detect(imageData);
+  captured={imageData:imageData,markers:markers};
+  tc.drawImage(off,0,0,160,120);
+  capturaDiv.style.display='block';
+  st.textContent='📸 Capturado! '+markers.length+' marcador(es)';
+  // reset sent states
+  pieceSent={};
+}
+
+function loop(){
+  try{
+    snap();
+    var imageData=ctx.getImageData(0,0,W,H);
+    var markers=detector.detect(imageData);
+
+    cx.clearRect(0,0,cv.width,cv.height);
+    var sw=cv.width/W,sh=cv.height/H;
+
+    for(var m=0;m<markers.length;m++){
+      var marker=markers[m];
+      var c=marker.corners;
+      cx.strokeStyle='rgba(60,220,120,0.9)';cx.lineWidth=3;
+      cx.beginPath();
+      cx.moveTo(c[0].x*sw,c[0].y*sh);
+      for(var i=1;i<4;i++)cx.lineTo(c[i].x*sw,c[i].y*sh);
+      cx.closePath();cx.stroke();
+      for(var i=0;i<4;i++){
+        cx.fillStyle='rgba(255,220,60,0.9)';
+        cx.beginPath();cx.arc(c[i].x*sw,c[i].y*sh,6,0,Math.PI*2);
+        cx.fill();
+      }
+      var cx2=(c[0].x+c[1].x+c[2].x+c[3].x)/4*sw;
+      var cy2=(c[0].y+c[1].y+c[2].y+c[3].y)/4*sh;
+      cx.strokeStyle='rgba(255,60,60,0.4)';cx.lineWidth=4;
+      cx.beginPath();cx.arc(cx2,cy2,28,0,Math.PI*2);
+      cx.stroke();
+      cx.strokeStyle='rgba(255,220,60,0.8)';cx.lineWidth=2;
+      cx.beginPath();cx.moveTo(cx2-16,cy2);cx.lineTo(cx2+16,cy2);
+      cx.moveTo(cx2,cy2-16);cx.lineTo(cx2,cy2+16);
+      cx.stroke();
+      cx.fillStyle='rgba(60,220,120,0.95)';
+      cx.font='bold 20px Georgia';
+      cx.textAlign='center';cx.textBaseline='bottom';
+      cx.fillText('ID:'+marker.id+' hd:'+marker.hammingDistance,cx2,cy2-32);
+    }
+
+    // compute alignment scores if captured
+    var perPiece={};
+    if(captured&&captured.markers.length>0){
+      for(var cm=0;cm<captured.markers.length;cm++){
+        var ref=captured.markers[cm];perPiece[ref.id]=0;
+        for(var m=0;m<markers.length;m++){
+          if(markers[m].id===ref.id){
+            var rc=ref.corners,mc=markers[m].corners;
+            var rx=(rc[0].x+rc[1].x+rc[2].x+rc[3].x)/4/W;
+            var ry=(rc[0].y+rc[1].y+rc[2].y+rc[3].y)/4/H;
+            var mx=(mc[0].x+mc[1].x+mc[2].x+mc[3].x)/4/W;
+            var my=(mc[0].y+mc[1].y+mc[2].y+mc[3].y)/4/H;
+            perPiece[ref.id]=Math.max(0,100-Math.sqrt((mx-rx)*(mx-rx)+(my-ry)*(my-ry))*200);
+            break;
+          }
+        }
+      }
+      var totalScore=0;
+      for(var pid in perPiece){totalScore+=perPiece[pid];
+        if(perPiece[pid]>=80)firePiece(parseInt(pid),true);
+        else if(perPiece[pid]<50)firePiece(parseInt(pid),false);
+      }
+      var score=0;
+      for(var pid in perPiece)score+=perPiece[pid];
+      score=score>0?Math.round(score/Object.keys(perPiece).length):0;
+      var statusText=score>80?'✅ seguindo ('+score+'%)':(score>40?'⚠️ '+score+'%':'❌ '+score+'%');
+      matchDiv.textContent=statusText;
+      for(var cm=0;cm<captured.markers.length;cm++){
+        var ref=captured.markers[cm];
+        for(var m=0;m<markers.length;m++){
+          if(markers[m].id===ref.id){
+            var mc=markers[m].corners;
+            var mx=(mc[0].x+mc[1].x+mc[2].x+mc[3].x)/4*sw;
+            var my=(mc[0].y+mc[1].y+mc[2].y+mc[3].y)/4*sh;
+            cx.strokeStyle='#fff';cx.lineWidth=2;cx.setLineDash([4,6]);
+            cx.beginPath();cx.arc(mx,my,36,0,Math.PI*2);cx.stroke();cx.setLineDash([]);
+            cx.fillStyle='#fff';cx.font='bold 14px Georgia';cx.textAlign='center';cx.textBaseline='top';
+            cx.fillText('P'+(ref.id+1)+':'+Math.round(perPiece[ref.id])+'%',mx,my+38);
+            break;
+          }
+        }
+      }
+      st.textContent=Object.keys(perPiece).length+'/'+captured.markers.length+' → '+statusText;
+    }else{
+      st.textContent=markers.length+' ArUco • 📸 para capturar referência';
+    }
+
+    // ALWAYS send tracking data to Firestore (throttled 500ms)
+    var now=Date.now();
+    if(now-lastTrackTs>500){
+      lastTrackTs=now;
+      var trackData={};
+      for(var m2=0;m2<markers.length;m2++){
+        var mk=markers[m2],c=mk.corners;
+        var corns=[Math.round(c[0].x)+','+Math.round(c[0].y),Math.round(c[1].x)+','+Math.round(c[1].y),Math.round(c[2].x)+','+Math.round(c[2].y),Math.round(c[3].x)+','+Math.round(c[3].y)];
+        trackData['m'+mk.id]={score:Math.round(perPiece[mk.id]||0),ts:now,corners:corns};
+      }
+      db.collection('tracking').doc('state').set({markers:trackData,timestamp:firebase.firestore.FieldValue.serverTimestamp()}).catch(function(){});
+    }
+  }catch(e){st.textContent='❌ '+e.message}
+  setTimeout(loop,150);
+}
+</script>
+</body>
+</html>

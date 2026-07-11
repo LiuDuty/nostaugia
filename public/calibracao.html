@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Calibração da Câmera</title>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#080b12;color:#fff;font-family:system-ui,'Segoe UI',Roboto,sans-serif;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#app{display:flex;width:100%;height:100%}
+#view{flex:1;position:relative;overflow:hidden;background:#000;min-width:0}
+#cam{position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
+#processed,#overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#processed{z-index:1;background:#000}
+#overlay{z-index:2;pointer-events:none}
+#status{position:absolute;left:16px;top:16px;z-index:4;max-width:min(520px,calc(100% - 32px));background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.16);border-radius:14px;padding:10px 14px;color:#fff;font:bold 14px/1.35 system-ui;box-shadow:0 8px 28px rgba(0,0,0,.35);backdrop-filter:blur(8px)}
+#start{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:30px;background:radial-gradient(circle at 50% 35%,#263a61,#080b12 58%);text-align:center}
+#start h1{font-size:clamp(28px,7vw,52px);letter-spacing:2px;text-transform:uppercase}
+#start p{max-width:520px;color:rgba(255,255,255,.68);line-height:1.5}
+#start button{border:0;border-radius:999px;padding:20px 44px;background:#00d4ff;color:#031018;font:bold 19px/1 system-ui;box-shadow:0 14px 38px rgba(0,212,255,.22);cursor:pointer}
+#panel{width:330px;min-width:330px;background:#101827;border-left:1px solid rgba(255,255,255,.1);overflow-y:auto;padding:16px;color:#dce8ff}
+#panel h2{font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#76d7ff;margin:10px 0 12px}
+.card{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 10px 30px rgba(0,0,0,.15)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:11px 0;color:rgba(220,232,255,.88);font-size:13px}
+.row strong{font-variant-numeric:tabular-nums;color:#fff}
+label{display:block;color:rgba(220,232,255,.9);font-size:13px;font-weight:700;margin-bottom:8px}
+input[type=range]{width:100%;accent-color:#00d4ff}
+select{width:100%;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:11px 12px;background:#07111c;color:#fff;font:13px system-ui;outline:none}
+.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;font-size:13px;font-weight:700}
+.toggle input{width:22px;height:22px;accent-color:#00d4ff}
+.btns{display:grid;gap:10px}
+button.action{width:100%;border:0;border-radius:12px;padding:13px 14px;color:#07111c;background:#00d4ff;font:bold 13px/1 system-ui;cursor:pointer}
+button.secondary{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.12)}
+button.danger{background:rgba(255,90,90,.16);color:#ffb8b8;border:1px solid rgba(255,90,90,.28)}
+.metric{display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;color:rgba(220,232,255,.7)}
+.metric:last-child{border-bottom:0}
+.metric b{color:#fff;font-variant-numeric:tabular-nums}
+.hint{font-size:12px;line-height:1.45;color:rgba(220,232,255,.58);margin-top:8px}
+.ok{color:#61ff9b}.warn{color:#ffd166}.bad{color:#ff8c8c}
+@media(max-width:820px){#app{flex-direction:column}#panel{width:100%;min-width:0;max-height:43vh;border-left:0;border-top:1px solid rgba(255,255,255,.1)}#status{font-size:12px}}
+@media(max-width:900px) and (orientation:landscape){#panel{position:absolute;right:10px;top:10px;bottom:10px;width:300px;min-width:0;max-height:none;border:1px solid rgba(255,255,255,.12);border-radius:18px;background:rgba(16,24,39,.88);backdrop-filter:blur(10px);z-index:6}#status{right:326px}}
+</style>
+</head>
+<body>
+<div id="start">
+  <h1>Calibração</h1>
+  <p>Use esta tela para ajustar zoom, limite de detecção e filtros da câmera antes de usar o detector principal.</p>
+  <button id="startBtn">Ligar câmera</button>
+  <div id="startStatus" class="hint">A permissão de câmera será solicitada após o toque.</div>
+</div>
+
+<div id="app">
+  <div id="view">
+    <video id="cam" autoplay playsinline muted></video>
+    <canvas id="processed"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="status">Aguardando câmera...</div>
+  </div>
+  <aside id="panel">
+    <h2>Calibração</h2>
+    <div class="card">
+      <label for="cameraSelect">Câmera</label>
+      <select id="cameraSelect"><option value="">Câmera traseira / padrão</option></select>
+      <div class="hint">A câmera escolhida é salva e usada também na tela do jogo.</div>
+      <label for="zoom">Zoom / afastar <strong id="zoomVal">1.0x</strong></label>
+      <input id="zoom" type="range" min="0.5" max="4" step="0.1" value="1">
+      <div class="hint" id="zoomMode">Zoom ainda não testado.</div>
+    </div>
+
+    <h2>Detecção</h2>
+    <div class="card">
+      <label for="lightThreshold">Limite de pixels claros <strong id="lightThresholdVal">120</strong></label>
+      <input id="lightThreshold" type="range" min="40" max="220" step="1" value="120">
+      <label for="minBright">Brilho mínimo da tela <strong id="minBrightVal">150</strong></label>
+      <input id="minBright" type="range" min="60" max="240" step="1" value="150">
+      <label for="edgeFactor">Sensibilidade da borda <strong id="edgeFactorVal">30%</strong></label>
+      <input id="edgeFactor" type="range" min="10" max="70" step="1" value="30">
+      <label for="minGradient">Gradiente mínimo <strong id="minGradientVal">10</strong></label>
+      <input id="minGradient" type="range" min="2" max="60" step="1" value="10">
+    </div>
+
+    <h2>Filtros</h2>
+    <div class="card">
+      <label for="brightness">Brilho <strong id="brightnessVal">0</strong></label>
+      <input id="brightness" type="range" min="-80" max="80" step="1" value="0">
+      <label for="contrast">Contraste <strong id="contrastVal">100%</strong></label>
+      <input id="contrast" type="range" min="50" max="220" step="1" value="100">
+      <div class="toggle"><span>Realce automático</span><input id="autoEnhance" type="checkbox"></div>
+      <div class="toggle"><span>Preto/branco para detecção</span><input id="blackWhite" type="checkbox"></div>
+      <div class="hint">O preview ao vivo mostra exatamente o frame processado pela configuração atual.</div>
+    </div>
+
+    <h2>FPS / Desempenho</h2>
+    <div class="card">
+      <label for="targetFps">FPS alvo da detecção <strong id="targetFpsVal">20</strong></label>
+      <input id="targetFps" type="range" min="5" max="60" step="1" value="20">
+      <label for="cameraFps">FPS solicitado da câmera <strong id="cameraFpsVal">30</strong></label>
+      <input id="cameraFps" type="range" min="15" max="60" step="1" value="30">
+      <label for="captureScale">Resolução de processamento <strong id="captureScaleVal">640x480</strong></label>
+      <input id="captureScale" type="range" min="0" max="2" step="1" value="1">
+      <label for="sendInterval">Envio Firestore <strong id="sendIntervalVal">500ms</strong></label>
+      <input id="sendInterval" type="range" min="100" max="1200" step="50" value="500">
+      <div class="toggle"><span>Detectar centro da tela</span><input id="detectScreen" type="checkbox" checked></div>
+      <div class="hint">Para mais FPS: use 320x240, reduza FPS alvo se o celular esquentar, desligue centro da tela e aumente o intervalo do Firestore.</div>
+    </div>
+
+    <h2>Status</h2>
+    <div class="card">
+      <div class="metric"><span>FPS</span><b id="mFps">-</b></div>
+      <div class="metric"><span>Tempo/frame</span><b id="mFrameMs">-</b></div>
+      <div class="metric"><span>ArUcos</span><b id="mMarkers">0</b></div>
+      <div class="metric"><span>Centro da tela</span><b id="mScreen">não</b></div>
+      <div class="metric"><span>Resolução</span><b id="mRes">640x480</b></div>
+      <div class="metric"><span>Configuração</span><b id="mSaved">local</b></div>
+    </div>
+
+    <div class="card btns">
+      <button class="action" id="saveBtn">Salvar calibração</button>
+      <button class="action secondary" id="testBtn">Testar detecção agora</button>
+      <button class="action secondary" id="detectBtn">Abrir detector principal</button>
+      <button class="action danger" id="resetBtn">Resetar padrões</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+let W = 640, H = 480;
+const STORAGE_KEY = 'infinite-puzzle-calibration-settings';
+const CAMERA_KEY = 'infinite-puzzle-camera-device-id';
+const CAPTURE_SIZES = [[320, 240], [640, 480], [960, 540]];
+const defaults = {
+  zoom: 1,
+  lightThreshold: 120,
+  minBright: 150,
+  edgeFactor: 30,
+  minGradient: 10,
+  brightness: 0,
+  contrast: 100,
+  autoEnhance: false,
+  blackWhite: false,
+  targetFps: 20,
+  cameraFps: 30,
+  captureScale: 1,
+  sendInterval: 500,
+  detectScreen: true
+};
+let settings = loadSettings();
+let running = false, cameraStream = null, cameraTrack = null, nativeZoom = null, useNativeZoom = false;
+let fps = 0, frames = 0, lastFps = 0, lastSend = 0, lastMarkers = [], lastScreen = null, lastFrameMs = 0;
+
+firebase.initializeApp({
+  apiKey: "AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",
+  authDomain: "infinitepuzze.firebaseapp.com",
+  projectId: "infinitepuzze",
+  storageBucket: "infinitepuzze.firebasestorage.app",
+  messagingSenderId: "65481405676",
+  appId: "1:65481405676:web:96952f779fa779ef9d21c9"
+});
+const db = firebase.firestore();
+const detector = new AR.Detector({ dictionaryName: 'ARUCO' });
+
+const cam = document.getElementById('cam');
+const processed = document.getElementById('processed');
+const pctx = processed.getContext('2d');
+const overlay = document.getElementById('overlay');
+const ox = overlay.getContext('2d');
+const start = document.getElementById('start');
+const startBtn = document.getElementById('startBtn');
+const startStatus = document.getElementById('startStatus');
+const statusEl = document.getElementById('status');
+const zoom = document.getElementById('zoom');
+const zoomVal = document.getElementById('zoomVal');
+const zoomMode = document.getElementById('zoomMode');
+const cameraSelect = document.getElementById('cameraSelect');
+const controls = ['lightThreshold','minBright','edgeFactor','minGradient','brightness','contrast','autoEnhance','blackWhite','targetFps','cameraFps','captureScale','sendInterval','detectScreen'];
+const off = document.createElement('canvas');
+off.width = W; off.height = H;
+const offCtx = off.getContext('2d', { willReadFrequently: true });
+
+function loadSettings() {
+  try { return Object.assign({}, defaults, JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')); }
+  catch(e) { return Object.assign({}, defaults); }
+}
+
+function saveSettings() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  localStorage.setItem(CAMERA_KEY, cameraSelect.value || '');
+  document.getElementById('mSaved').textContent = 'salvo';
+  setTimeout(() => document.getElementById('mSaved').textContent = 'local', 1200);
+}
+
+async function populateCameraSelect() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  const selected = localStorage.getItem(CAMERA_KEY) || cameraSelect.value || '';
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter(d => d.kind === 'videoinput');
+  cameraSelect.innerHTML = '<option value="">Câmera traseira / padrão</option>';
+  cameras.forEach((camera, index) => {
+    const option = document.createElement('option');
+    option.value = camera.deviceId;
+    option.textContent = camera.label || ('Câmera ' + (index + 1));
+    cameraSelect.appendChild(option);
+  });
+  cameraSelect.value = cameras.some(c => c.deviceId === selected) ? selected : '';
+}
+
+function stopCamera() {
+  running = false;
+  if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+  cameraStream = null;
+  cameraTrack = null;
+  nativeZoom = null;
+  useNativeZoom = false;
+}
+
+function resize() {
+  const view = document.getElementById('view');
+  processed.width = view.clientWidth;
+  processed.height = view.clientHeight;
+  overlay.width = view.clientWidth;
+  overlay.height = view.clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function syncControls() {
+  applyCaptureSize();
+  zoom.value = settings.zoom;
+  for (const id of controls) {
+    const el = document.getElementById(id);
+    if (el.type === 'checkbox') el.checked = !!settings[id];
+    else el.value = settings[id];
+  }
+  updateLabels();
+}
+
+function updateLabels() {
+  const size = CAPTURE_SIZES[Number(settings.captureScale)] || CAPTURE_SIZES[1];
+  zoomVal.textContent = Number(settings.zoom).toFixed(1) + 'x';
+  document.getElementById('lightThresholdVal').textContent = settings.lightThreshold;
+  document.getElementById('minBrightVal').textContent = settings.minBright;
+  document.getElementById('edgeFactorVal').textContent = settings.edgeFactor + '%';
+  document.getElementById('minGradientVal').textContent = settings.minGradient;
+  document.getElementById('brightnessVal').textContent = settings.brightness;
+  document.getElementById('contrastVal').textContent = settings.contrast + '%';
+  document.getElementById('targetFpsVal').textContent = settings.targetFps;
+  document.getElementById('cameraFpsVal').textContent = settings.cameraFps;
+  document.getElementById('captureScaleVal').textContent = size[0] + 'x' + size[1];
+  document.getElementById('sendIntervalVal').textContent = settings.sendInterval + 'ms';
+}
+
+function applyCaptureSize() {
+  const size = CAPTURE_SIZES[Number(settings.captureScale)] || CAPTURE_SIZES[1];
+  W = size[0];
+  H = size[1];
+  off.width = W;
+  off.height = H;
+  document.getElementById('mRes').textContent = W + 'x' + H;
+}
+
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+async function applyZoom() {
+  if (Number(settings.zoom) < 1 || !cameraTrack || !nativeZoom) {
+    useNativeZoom = false;
+    zoomMode.innerHTML = Number(settings.zoom) < 1 ? '<span class="warn">Afastamento digital</span>' : '<span class="warn">Zoom digital</span>';
+    return;
+  }
+  const value = clamp(Number(settings.zoom), nativeZoom.min, nativeZoom.max);
+  try {
+    await cameraTrack.applyConstraints({ advanced: [{ zoom: value }] });
+    useNativeZoom = true;
+    zoomMode.innerHTML = '<span class="ok">Zoom da câmera</span>';
+  } catch(e) {
+    useNativeZoom = false;
+    zoomMode.innerHTML = '<span class="warn">Zoom digital</span>';
+  }
+}
+
+function snap() {
+  const z = useNativeZoom ? 1 : clamp(Number(settings.zoom), 0.5, 8);
+  if (!cam.videoWidth || !cam.videoHeight) return;
+  offCtx.fillStyle = '#000';
+  offCtx.fillRect(0, 0, W, H);
+  if (z < 0.99) {
+    const dw = W * z;
+    const dh = H * z;
+    offCtx.drawImage(cam, 0, 0, cam.videoWidth, cam.videoHeight, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    return;
+  }
+  if (z <= 1.01) {
+    offCtx.drawImage(cam, 0, 0, W, H);
+    return;
+  }
+  const sw = cam.videoWidth / z;
+  const sh = cam.videoHeight / z;
+  const sx = (cam.videoWidth - sw) / 2;
+  const sy = (cam.videoHeight - sh) / 2;
+  offCtx.drawImage(cam, sx, sy, sw, sh, 0, 0, W, H);
+}
+
+function drawProcessedPreview(imageData) {
+  offCtx.putImageData(imageData, 0, 0);
+  pctx.clearRect(0, 0, processed.width, processed.height);
+  pctx.drawImage(off, 0, 0, processed.width, processed.height);
+}
+
+async function applyCameraFrameRate() {
+  if (!cameraTrack) return;
+  try {
+    await cameraTrack.applyConstraints({ advanced: [{ frameRate: Number(settings.cameraFps) }] });
+  } catch(e) {
+    try { await cameraTrack.applyConstraints({ frameRate: { ideal: Number(settings.cameraFps) } }); }
+    catch(err) {}
+  }
+}
+
+function applyFilters(img) {
+  const d = img.data;
+  const brightness = Number(settings.brightness);
+  const contrast = Number(settings.contrast) / 100;
+  const intercept = 128 * (1 - contrast) + brightness;
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i] * contrast + intercept;
+    let g = d[i + 1] * contrast + intercept;
+    let b = d[i + 2] * contrast + intercept;
+    if (settings.blackWhite) {
+      const y = r * 0.299 + g * 0.587 + b * 0.114;
+      r = g = b = y >= settings.lightThreshold ? 255 : 0;
+    }
+    d[i] = clamp(r, 0, 255);
+    d[i + 1] = clamp(g, 0, 255);
+    d[i + 2] = clamp(b, 0, 255);
+  }
+  if (settings.autoEnhance) enhanceImage(img);
+}
+
+function enhanceImage(img) {
+  const d = img.data;
+  let min = 255, max = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    if (g < min) min = g;
+    if (g > max) max = g;
+  }
+  const range = max - min;
+  if (range < 5 || range > 245) return;
+  const scale = 255 / range;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = clamp((d[i] - min) * scale, 0, 255);
+    d[i + 1] = clamp((d[i + 1] - min) * scale, 0, 255);
+    d[i + 2] = clamp((d[i + 2] - min) * scale, 0, 255);
+  }
+}
+
+function findScreenCenter(imageData) {
+  const w = imageData.width, h = imageData.height, d = imageData.data;
+  const gray = new Uint8Array(w * h);
+  const light = Number(settings.lightThreshold);
+  for (let i = 0; i < gray.length; i++) gray[i] = (d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114) | 0;
+  const hProj = new Uint32Array(h), vProj = new Uint32Array(w);
+  for (let y = 0; y < h; y++) { const offY = y * w; for (let x = 0; x < w; x += 8) hProj[y] += gray[offY + x] > light ? 1 : 0; }
+  for (let x = 0; x < w; x++) { for (let y = 0; y < h; y += 8) vProj[x] += gray[y * w + x] > light ? 1 : 0; }
+  let maxV = 0, cx = 0, maxH = 0, cy = 0;
+  for (let x = 0; x < w; x++) if (vProj[x] > maxV) { maxV = vProj[x]; cx = x; }
+  for (let y = 0; y < h; y++) if (hProj[y] > maxH) { maxH = hProj[y]; cy = y; }
+  if (maxV < Math.ceil(h / 8) * 0.2 || maxH < Math.ceil(w / 8) * 0.2) return null;
+  if (gray[cy * w + cx] < light) return null;
+  const rw = (w * 0.1) | 0, rh = (h * 0.1) | 0;
+  let sum = 0, count = 0;
+  for (let y = Math.max(0, cy - rh); y < Math.min(h, cy + rh); y++) {
+    for (let x = Math.max(0, cx - rw); x < Math.min(w, cx + rw); x++) { sum += gray[y * w + x]; count++; }
+  }
+  const avgBright = count ? sum / count : 0;
+  if (avgBright < Number(settings.minBright)) return null;
+  const thr = avgBright * (Number(settings.edgeFactor) / 100);
+  const minGrad = Number(settings.minGradient);
+  const scanOut = (fromX, fromY, ddx, ddy, probes, maxSteps) => {
+    const hits = [], probeStep = (ddx !== 0 ? w : h) * 0.07;
+    for (let p = 0; p < probes; p++) {
+      const offP = p - (probes - 1) / 2;
+      const sx = (fromX + (ddy === 0 ? offP * probeStep : 0)) | 0;
+      const sy = (fromY + (ddx === 0 ? offP * probeStep : 0)) | 0;
+      let bestGrad = 0, bestPos = -1;
+      for (let s = 0; s < maxSteps; s++) {
+        const x = sx + ddx * s, y = sy + ddy * s;
+        if (x < 2 || x >= w - 2 || y < 2 || y >= h - 2) break;
+        const curr = gray[y * w + x];
+        if (curr < thr + 30 && curr > thr - 30) {
+          const grad = ddx !== 0 ? Math.abs(curr - gray[y * w + x - ddx]) : Math.abs(curr - gray[(y - ddy) * w + x]);
+          if (grad > bestGrad) { bestGrad = grad; bestPos = ddx !== 0 ? x : y; }
+        }
+      }
+      if (bestGrad > minGrad) hits.push(bestPos);
+    }
+    if (hits.length < 3) return -1;
+    hits.sort((a, b) => a - b);
+    return hits[(hits.length / 2) | 0];
+  };
+  const top = scanOut(cx, cy, 0, -1, 7, cy + 1), bottom = scanOut(cx, cy, 0, 1, 7, h - cy);
+  const left = scanOut(cx, cy, -1, 0, 7, cx + 1), right = scanOut(cx, cy, 1, 0, 7, w - cx);
+  if (top < 0 || bottom < 0 || left < 0 || right < 0) return null;
+  if (right - left < w * 0.15 || bottom - top < h * 0.15) return null;
+  return { x:(left + right) / 2 / w, y:(top + bottom) / 2 / h, top:top / h, bottom:bottom / h, left:left / w, right:right / w,
+    c1:{x:left / w,y:top / h}, c2:{x:right / w,y:top / h}, c3:{x:right / w,y:bottom / h}, c4:{x:left / w,y:bottom / h} };
+}
+
+function draw(markers, screen) {
+  const Wv = overlay.width, Hv = overlay.height, sw = Wv / W, sh = Hv / H;
+  ox.clearRect(0, 0, Wv, Hv);
+  if (screen) {
+    ox.strokeStyle = 'rgba(0,212,255,.65)'; ox.lineWidth = 3; ox.setLineDash([8, 7]);
+    ox.strokeRect(screen.left * Wv, screen.top * Hv, (screen.right - screen.left) * Wv, (screen.bottom - screen.top) * Hv);
+    ox.setLineDash([]);
+    ox.fillStyle = '#00d4ff'; ox.beginPath(); ox.arc(screen.x * Wv, screen.y * Hv, 8, 0, Math.PI * 2); ox.fill();
+  }
+  for (const marker of markers) {
+    const pts = marker.corners.map(p => ({ x:p.x * sw, y:p.y * sh }));
+    ox.strokeStyle = 'rgba(97,255,155,.95)'; ox.lineWidth = 3;
+    ox.beginPath(); ox.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < 4; i++) ox.lineTo(pts[i].x, pts[i].y); ox.closePath(); ox.stroke();
+    const cx = pts.reduce((s, p) => s + p.x, 0) / 4, cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+    ox.fillStyle = '#61ff9b'; ox.font = 'bold 16px system-ui'; ox.textAlign = 'center'; ox.textBaseline = 'bottom';
+    ox.fillText('ID ' + marker.id, cx, cy - 18);
+    ox.fillStyle = '#ff5a5a'; ox.beginPath(); ox.arc(cx, cy, 5, 0, Math.PI * 2); ox.fill();
+  }
+}
+
+function updateMetrics(markers, screen) {
+  document.getElementById('mFps').textContent = fps ? fps + ' fps' : '-';
+  document.getElementById('mFrameMs').textContent = lastFrameMs ? lastFrameMs.toFixed(1) + 'ms' : '-';
+  document.getElementById('mMarkers').textContent = markers.length;
+  document.getElementById('mScreen').innerHTML = screen ? '<span class="ok">sim</span>' : '<span class="bad">não</span>';
+  statusEl.textContent = markers.length ? `Detectando ${markers.length} ArUco(s) - ${fps} FPS` : `Aguardando ArUco - ${fps} FPS`;
+}
+
+function sendTracking(markers, screen, now) {
+  if (now - lastSend < Number(settings.sendInterval)) return;
+  lastSend = now;
+  const trackData = {};
+  for (const marker of markers) {
+    const c = marker.corners;
+    trackData['m' + marker.id] = { score: 100, ts: now, corners: c.map(p => Math.round(p.x) + ',' + Math.round(p.y)) };
+  }
+  db.collection('tracking').doc('state').set({
+    markers: trackData,
+    center: { x: screen ? screen.x : null, y: screen ? screen.y : null, detected: !!screen,
+      c1: screen ? screen.c1 : null, c2: screen ? screen.c2 : null, c3: screen ? screen.c3 : null, c4: screen ? screen.c4 : null },
+    calibration: settings,
+    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(function(e){ console.error('Firestore erro:', e); });
+}
+
+function detectLoop() {
+  if (!running) return;
+  const frameStart = performance.now();
+  try {
+    snap();
+    const imageData = offCtx.getImageData(0, 0, W, H);
+    applyFilters(imageData);
+    drawProcessedPreview(imageData);
+    const markers = detector.detect(imageData);
+    const screen = settings.detectScreen ? findScreenCenter(imageData) : null;
+    const now = Date.now();
+    lastFrameMs = performance.now() - frameStart;
+    frames++;
+    if (now - lastFps >= 1000) { fps = Math.round(frames * 1000 / (now - lastFps)); frames = 0; lastFps = now; }
+    lastMarkers = markers; lastScreen = screen;
+    draw(markers, screen);
+    updateMetrics(markers, screen);
+    sendTracking(markers, screen, now);
+  } catch(e) {
+    statusEl.textContent = 'Erro: ' + e.message;
+  }
+  const targetDelay = 1000 / Math.max(1, Number(settings.targetFps));
+  const delay = Math.max(0, targetDelay - (performance.now() - frameStart));
+  setTimeout(detectLoop, delay);
+}
+
+async function startCamera() {
+  startStatus.textContent = 'Solicitando câmera...';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    startStatus.textContent = 'Este navegador não suporta câmera.';
+    return;
+  }
+  try {
+    stopCamera();
+    const deviceId = cameraSelect.value || localStorage.getItem(CAMERA_KEY) || '';
+    const video = deviceId
+      ? { deviceId: { exact: deviceId }, width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:Number(settings.cameraFps),max:Number(settings.cameraFps)} }
+      : { facingMode:'environment', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:Number(settings.cameraFps),max:Number(settings.cameraFps)} };
+    const stream = await navigator.mediaDevices.getUserMedia({ video, audio:false });
+    cameraStream = stream;
+    cameraTrack = stream.getVideoTracks()[0];
+    const capabilities = cameraTrack.getCapabilities ? cameraTrack.getCapabilities() : {};
+    if (capabilities.zoom) {
+      nativeZoom = capabilities.zoom;
+      zoom.min = 0.5;
+      zoom.max = Math.min(nativeZoom.max || 4, 8);
+      zoom.step = nativeZoom.step || 0.1;
+    }
+    cam.srcObject = stream;
+    await cam.play();
+    await populateCameraSelect();
+    await applyCameraFrameRate();
+    await applyZoom();
+    start.style.display = 'none';
+    running = true;
+    lastFps = Date.now();
+    detectLoop();
+  } catch(e) {
+    startStatus.textContent = 'Erro ao abrir câmera: ' + e.message;
+  }
+}
+
+cameraSelect.addEventListener('change', async function(){
+  localStorage.setItem(CAMERA_KEY, cameraSelect.value || '');
+  if (running) await startCamera();
+});
+
+zoom.addEventListener('input', async function(){ settings.zoom = Number(zoom.value); updateLabels(); await applyZoom(); });
+for (const id of controls) {
+  const el = document.getElementById(id);
+  el.addEventListener('input', async function(){
+    settings[id] = el.type === 'checkbox' ? el.checked : Number(el.value);
+    if (id === 'captureScale') applyCaptureSize();
+    if (id === 'cameraFps') await applyCameraFrameRate();
+    updateLabels();
+  });
+}
+document.getElementById('saveBtn').addEventListener('click', saveSettings);
+document.getElementById('testBtn').addEventListener('click', function(){ draw(lastMarkers, lastScreen); updateMetrics(lastMarkers, lastScreen); });
+document.getElementById('detectBtn').addEventListener('click', function(){ location.href = '/detect.html'; });
+document.getElementById('resetBtn').addEventListener('click', async function(){ settings = Object.assign({}, defaults); syncControls(); saveSettings(); await applyZoom(); });
+startBtn.addEventListener('click', startCamera);
+syncControls();
+populateCameraSelect().catch(function(){});
+</script>
+</body>
+</html>

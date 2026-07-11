@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Detector ArUco</title>
+<!-- OpenCV.js (carregado para uso futuro com cv.getPerspectiveTransform) -->
+<script src="https://docs.opencv.org/4.8.0/opencv.js" async></script>
+<!-- js-aruco2: implementação do detector ArUco em JS puro (mesmo algoritmo do OpenCV contrib) -->
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<!-- Firebase: comunicação em tempo real com o PC -->
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<style>
+/* === RESET === */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#f5f5f5;font-family:system-ui,'Segoe UI',Roboto,sans-serif;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+
+/* === LAYOUT PRINCIPAL === */
+#app{display:flex;width:100%;height:100%}
+
+/* === ÁREA DA CÂMERA === */
+#view{flex:1;position:relative;overflow:hidden;background:#000;min-width:0}
+#view video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+#view canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#view #status-overlay{position:absolute;top:16px;left:16px;z-index:3;pointer-events:none;
+  font:bold 14px/1.4 system-ui;color:#fff;text-shadow:0 1px 8px rgba(0,0,0,0.7);
+  background:rgba(0,0,0,0.5);padding:6px 14px;border-radius:8px;backdrop-filter:blur(4px)}
+
+/* === PAINEL LATERAL === */
+#panel{width:280px;min-width:280px;background:#fff;display:flex;flex-direction:column;
+  border-left:1px solid #e0e0e0;overflow-y:auto;font-size:14px;color:#333}
+#panel h2{font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#999;
+  padding:20px 20px 10px;border-bottom:1px solid #eee}
+.info-table{width:100%;border-collapse:collapse}
+.info-table td{padding:10px 20px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+.info-table td:first-child{color:#888;font-size:12px;width:100px}
+.info-table td:last-child{font-weight:600;font-size:15px;font-variant-numeric:tabular-nums}
+.info-table .status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.info-table .status-dot.ok{background:#4caf50;box-shadow:0 0 8px rgba(76,175,80,0.5)}
+.info-table .status-dot.lost{background:#f44336;box-shadow:0 0 8px rgba(244,67,54,0.5)}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff}
+.badge.g{background:#4caf50}.badge.r{background:#f44336}.badge.y{background:#ff9800}
+
+/* === MODO CALIBRAÇÃO === */
+#calib-overlay{position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none}
+#calib-overlay .corner{position:absolute;width:24px;height:24px;border:3px solid #ff9800;
+  border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 20px rgba(255,152,0,0.5)}
+#calib-overlay .corner-label{position:absolute;color:#ff9800;font:bold 13px system-ui;
+  text-shadow:0 0 10px rgba(0,0,0,0.8);transform:translate(-50%,-50%)}
+#calib-btn{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:6;
+  padding:12px 30px;border:none;border-radius:30px;background:rgba(255,152,0,0.9);
+  color:#fff;font:bold 16px system-ui;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.3);
+  -webkit-tap-highlight-color:transparent;pointer-events:auto}
+#calib-btn:active{background:#e65100}
+#flip-btn{position:absolute;bottom:20px;right:20px;z-index:6;
+  width:48px;height:48px;border-radius:50%;border:2px solid rgba(255,255,255,0.3);
+  background:rgba(0,0,0,0.4);color:#fff;font-size:22px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;pointer-events:auto;backdrop-filter:blur(4px)}
+#record-controls{position:absolute;bottom:20px;left:20px;z-index:6;display:none;gap:10px;pointer-events:auto}
+#record-controls button{border:0;border-radius:999px;padding:13px 18px;color:#fff;font:bold 13px/1 system-ui;box-shadow:0 4px 20px rgba(0,0,0,.35);-webkit-tap-highlight-color:transparent}
+#record-start{background:rgba(244,67,54,.92)}
+#record-stop{background:rgba(40,40,40,.86)}
+#record-stop:disabled{opacity:.45}
+
+/* === PEÇAS DETECTADAS (MULTI) === */
+#pieces-list{padding:12px 20px}
+.piece-card{background:#fafafa;border:1px solid #eee;border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.piece-card h3{font-size:14px;margin-bottom:6px;color:#333}
+.piece-card .row{display:flex;justify-content:space-between;font-size:12px;color:#666;padding:2px 0}
+.piece-card .row .val{font-weight:600;color:#333}
+
+/* === BOTÃO CÂMERA === */
+#camstart{position:fixed;top:0;left:0;width:100%;height:100%;z-index:20;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:#0a0e1a;color:#fff;font:18px/1.6 system-ui;text-align:center;gap:24px;padding:30px}
+#camstart button{padding:22px 60px;border:none;border-radius:40px;
+  background:rgba(60,200,255,0.95);color:#000;font:bold 22px/1 system-ui;cursor:pointer;
+  box-shadow:0 4px 30px rgba(0,0,0,0.5);-webkit-tap-highlight-color:transparent}
+#camstart button:active{background:rgba(60,200,255,0.7)}
+
+/* === RESPONSIVO === */
+@media(max-width:768px){
+  #app{flex-direction:column}
+  #panel{width:100%;min-width:0;max-height:40vh;border-left:none;border-top:1px solid #e0e0e0}
+  #panel #pieces-list{display:flex;gap:8px;overflow-x:auto;padding:10px 16px}
+  #panel #pieces-list .piece-card{min-width:180px;flex-shrink:0;margin-bottom:0}
+}
+/* Landscape em celular: câmera fullscreen, painel oculto */
+@media(max-width:900px) and (orientation:landscape){
+  #panel{display:none}
+  #view{flex:none;width:100%;height:100%}
+}
+</style>
+</head>
+<body>
+
+<!-- Tela inicial: iniciar câmera -->
+<div id="camstart">
+  <div style="font-size:48px">🎯</div>
+  <div id="camstart-status">Toque para ligar a câmera</div>
+  <button id="start-btn">▶ LIGAR CÂMERA</button>
+  <div style="font-size:13px;color:rgba(255,255,255,0.4)">Permissão de câmera solicitada após o toque</div>
+</div>
+
+<!-- Aplicação principal -->
+<div id="app">
+  <!-- Área da câmera -->
+  <div id="view">
+    <video id="cam" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="status-overlay">Iniciando...</div>
+    <!-- Alvos de calibração (invisíveis até ativar) -->
+    <div id="calib-overlay" style="display:none">
+      <div class="corner" style="top:5%;left:5%"></div>
+      <div class="corner" style="top:5%;right:5%"></div>
+      <div class="corner" style="bottom:5%;right:5%"></div>
+      <div class="corner" style="bottom:5%;left:5%"></div>
+      <div class="corner-label" style="top:calc(5% - 18px);left:5%">1</div>
+      <div class="corner-label" style="top:calc(5% - 18px);right:5%">2</div>
+      <div class="corner-label" style="bottom:calc(5% - 18px);right:5%">3</div>
+      <div class="corner-label" style="bottom:calc(5% - 18px);left:5%">4</div>
+    </div>
+    <button id="calib-btn" style="display:none">📍 CALIBRAR</button>
+    <button id="flip-btn" style="display:none" onclick="state.flipped=!state.flipped;cam.style.transform=state.flipped?'rotate(180deg)':'';overlay.style.transform=state.flipped?'rotate(180deg)':''">🔄</button>
+    <div id="record-controls">
+      <button id="record-start">⏺ Iniciar gravação</button>
+      <button id="record-stop" disabled>⏹ Parar</button>
+    </div>
+  </div>
+
+  <!-- Painel lateral -->
+  <div id="panel">
+    <h2>📡 Rastreamento</h2>
+    <table class="info-table">
+      <tr><td>FPS</td><td id="d-fps">—</td></tr>
+      <tr><td>Status</td><td id="d-status"><span class="status-dot lost"></span>Aguardando</td></tr>
+      <tr><td>Peças ativas</td><td id="d-count">0</td></tr>
+      <tr><td>Calibração</td><td id="d-calib"><span class="badge y">Pendente</span></td></tr>
+      <tr><td>Resolução</td><td id="d-res">—</td></tr>
+    </table>
+    <h2>🧩 Peças detectadas</h2>
+    <div id="pieces-list">
+      <div style="color:#999;font-size:13px;padding:16px 0;text-align:center">Nenhuma peça detectada ainda</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIGURAÇÕES
+// ============================================================
+
+const W = 640;       // Largura de captura (pixels)
+const H = 480;       // Altura de captura (pixels)
+const TRAIL_MAX = 60;      // Máximo de pontos no rastro
+const TRAIL_FADE_MS = 5000; // Tempo de fading do rastro (ms)
+const SMOOTH_WINDOW = 15;   // Janela da média móvel (maior = mais suave)
+const DEAD_ZONE = 0.005;    // Zona morta (ignora tremores menores que 0,5% da tela)
+const TRACK_INTERVAL = 50;  // Intervalo do loop (ms)
+const CALIB_CORNERS = [     // Cantos da tela (normalizados 0-1)
+  [0.05, 0.05],  // Superior esquerdo
+  [0.95, 0.05],  // Superior direito
+  [0.95, 0.95],  // Inferior direito
+  [0.05, 0.95]   // Inferior esquerdo
+];
+
+
+// ============================================================
+// ESTADO GLOBAL
+// ============================================================
+
+const state = {
+  running: false,
+  flipped: false,
+  fps: 0,
+  frameCount: 0,
+  lastFpsTime: 0,
+  status: 'iniciando',
+  calibMode: false,
+  calibStep: 0,
+  calibPoints: [],     // 4 pontos da calibração [(cx,cy), ...] em coordenadas da câmera
+  calibrated: false,
+  transformMatrix: null, // Matriz 3x3 de transformação perspectiva
+  lastTrackTs: 0
+};
+
+// ============================================================
+// FIREBASE: comunicação em tempo real com PC
+// ============================================================
+
+firebase.initializeApp({
+  apiKey: "AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",
+  authDomain: "infinitepuzze.firebaseapp.com",
+  projectId: "infinitepuzze",
+  storageBucket: "infinitepuzze.firebasestorage.app",
+  messagingSenderId: "65481405676",
+  appId: "1:65481405676:web:96952f779fa779ef9d21c9"
+});
+const db = firebase.firestore();
+
+// ============================================================
+// ESTRUTURA MULTI-PEÇA: cada peça mantém seu próprio estado
+// Quando um novo ID ArUco é detectado, um tracker é criado automaticamente
+// ============================================================
+
+class PieceTracker {
+  constructor(id) {
+    this.id = id;                    // ID do marcador ArUco
+    this.rawPositions = [];          // Posições brutas (sem suavização)
+    this.smoothedX = 0;              // Posição suavizada X
+    this.smoothedY = 0;              // Posição suavizada Y
+    this.normX = 0;                  // X normalizado (0-100%)
+    this.normY = 0;                  // Y normalizado (0-100%)
+    this.trail = [];                 // Rastro para desenho
+    this.status = 'lost';            // 'detected' | 'lost'
+    this.lastSeen = 0;               // Timestamp da última detecção
+    this.consecutiveLost = 0;        // Frames consecutivos sem detecção
+    this.corners = null;             // Últimos cantos detectados
+  }
+
+  // Adiciona posição bruta e aplica suavização (média móvel)
+  addPosition(x, y, corners, now) {
+    // Zona morta: ignora tremores menores que DEAD_ZONE
+    if (this.rawPositions.length > 0) {
+      const dx = x - this.rawPositions[this.rawPositions.length - 1].x;
+      const dy = y - this.rawPositions[this.rawPositions.length - 1].y;
+      if (Math.sqrt(dx * dx + dy * dy) < DEAD_ZONE) {
+        // Atualiza só o timestamp e corners, sem mover a posição
+        this.lastSeen = now;
+        this.corners = corners;
+        return;
+      }
+    }
+
+    this.rawPositions.push({ x, y, ts: now });
+    if (this.rawPositions.length > SMOOTH_WINDOW) {
+      this.rawPositions.shift();
+    }
+
+    // Média móvel: calcula a média das últimas N posições
+    let sx = 0, sy = 0;
+    for (let i = 0; i < this.rawPositions.length; i++) {
+      sx += this.rawPositions[i].x;
+      sy += this.rawPositions[i].y;
+    }
+    this.smoothedX = sx / this.rawPositions.length;
+    this.smoothedY = sy / this.rawPositions.length;
+
+    // Adiciona ao rastro (para desenho)
+    this.trail.push({ x: this.smoothedX, y: this.smoothedY, ts: now });
+    if (this.trail.length > TRAIL_MAX) this.trail.shift();
+
+    // Atualiza status
+    this.status = 'detected';
+    this.lastSeen = now;
+    this.consecutiveLost = 0;
+    this.corners = corners;
+  }
+
+  // Marca como perdido se não foi visto neste frame
+  markLost(now) {
+    this.consecutiveLost++;
+    // Só considera perdido após 3 frames consecutivos sem detecção
+    if (this.consecutiveLost >= 3) {
+      this.status = 'lost';
+    }
+  }
+
+  // Aplica transformação de calibração para obter coordenadas normalizadas
+  applyCalibration(matrix) {
+    if (!matrix) return;
+    const result = applyPerspectiveTransform(this.smoothedX, this.smoothedY, matrix);
+    if (result) {
+      this.normX = Math.max(0, Math.min(100, result[0]));
+      this.normY = Math.max(0, Math.min(100, result[1]));
+    }
+  }
+}
+
+// Mapa de trackers indexado pelo ID do marcador
+const pieces = {};
+
+function getPiece(id) {
+  if (!pieces[id]) pieces[id] = new PieceTracker(id);
+  return pieces[id];
+}
+
+// ============================================================
+// UTILITÁRIOS MATEMÁTICOS
+// ============================================================
+
+// Calcula matriz de transformação perspectiva 3x3 a partir de 4 pares de pontos
+// Usa o método das coordenadas homogêneas (mesmo algoritmo do OpenCV)
+function computePerspectiveTransform(src, dst) {
+  if (src.length !== 4 || dst.length !== 4) return null;
+  // Cria sistema linear 8×8 e resolve para os 8 parâmetros da matriz
+  const A = [], B = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx, sy] = src[i];
+    const [dx, dy] = dst[i];
+    A.push([sx, sy, 1, 0, 0, 0, -sx*dx, -sy*dx]);
+    A.push([0, 0, 0, sx, sy, 1, -sx*dy, -sy*dy]);
+    B.push(dx);
+    B.push(dy);
+  }
+  // Resolve usando eliminação de Gauss-Jordan
+  const n = 8;
+  for (let col = 0; col < n; col++) {
+    // Encontra pivô
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) maxRow = row;
+    }
+    [A[col], A[maxRow]] = [A[maxRow], A[col]];
+    [B[col], B[maxRow]] = [B[maxRow], B[col]];
+    const pivot = A[col][col];
+    if (Math.abs(pivot) < 1e-10) return null;
+    for (let j = col; j < n; j++) A[col][j] /= pivot;
+    B[col] /= pivot;
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const factor = A[row][col];
+      if (Math.abs(factor) < 1e-10) continue;
+      for (let j = col; j < n; j++) A[row][j] -= factor * A[col][j];
+      B[row] -= factor * B[col];
+    }
+  }
+  return [
+    [B[0], B[1], B[2]],
+    [B[3], B[4], B[5]],
+    [B[6], B[7], 1]
+  ];
+}
+
+// Aplica matriz de transformação perspectiva 3×3 a um ponto (x, y)
+function applyPerspectiveTransform(x, y, matrix) {
+  if (!matrix) return null;
+  const w = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2];
+  if (Math.abs(w) < 1e-10) return null;
+  const nx = (matrix[0][0] * x + matrix[0][1] * y + matrix[0][2]) / w;
+  const ny = (matrix[1][0] * x + matrix[1][1] * y + matrix[1][2]) / w;
+  return [nx, ny];
+}
+
+// ============================================================
+// REFERÊNCIAS DOM
+// ============================================================
+
+const cam = document.getElementById('cam');
+const overlay = document.getElementById('overlay');
+const ox = overlay.getContext('2d');
+const statusOverlay = document.getElementById('status-overlay');
+const camstart = document.getElementById('camstart');
+const camstartStatus = document.getElementById('camstart-status');
+const startBtn = document.getElementById('start-btn');
+const calibOverlay = document.getElementById('calib-overlay');
+const calibBtn = document.getElementById('calib-btn');
+const dFps = document.getElementById('d-fps');
+const dStatus = document.getElementById('d-status');
+const dCount = document.getElementById('d-count');
+const dCalib = document.getElementById('d-calib');
+const dRes = document.getElementById('d-res');
+const piecesList = document.getElementById('pieces-list');
+const recordControls = document.getElementById('record-controls');
+const recordStart = document.getElementById('record-start');
+const recordStop = document.getElementById('record-stop');
+let cameraStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+
+// Canvas offscreen para captura
+const off = document.createElement('canvas');
+off.width = W;
+off.height = H;
+const offCtx = off.getContext('2d');
+
+// ============================================================
+// REDIMENSIONAMENTO
+// ============================================================
+
+function resize() {
+  overlay.width = window.innerWidth;
+  overlay.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// CAPTURA DE FRAME
+// ============================================================
+
+function snap() {
+  if (state.flipped) {
+    offCtx.save();
+    offCtx.translate(W / 2, H / 2);
+    offCtx.rotate(Math.PI);
+    offCtx.drawImage(cam, -W / 2, -H / 2, W, H);
+    offCtx.restore();
+  } else {
+    offCtx.drawImage(cam, 0, 0, W, H);
+  }
+}
+
+// ============================================================
+// GRAVAÇÃO LOCAL DA CÂMERA
+// ============================================================
+
+function recordingMimeType() {
+  const types = ['video/mp4;codecs=h264', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const type of types) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return '';
+}
+
+function recordingExtension(type) {
+  return type && type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+}
+
+function recordingFileName() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const type = (mediaRecorder && mediaRecorder.mimeType) || recordingMimeType();
+  return 'infinite-puzzle-camera-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + recordingExtension(type);
+}
+
+function startRecording() {
+  if (!cameraStream || mediaRecorder) return;
+  if (!window.MediaRecorder) {
+    alert('Este navegador não suporta gravação de vídeo. Tente Chrome no Android.');
+    return;
+  }
+  recordedChunks = [];
+  const mimeType = recordingMimeType();
+  const options = mimeType ? { mimeType } : undefined;
+  try {
+    mediaRecorder = new MediaRecorder(cameraStream, options);
+  } catch (e) {
+    alert('Não foi possível iniciar a gravação: ' + e.message);
+    mediaRecorder = null;
+    return;
+  }
+  mediaRecorder.ondataavailable = e => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = recordingFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    mediaRecorder = null;
+    recordedChunks = [];
+    recordStart.disabled = false;
+    recordStop.disabled = true;
+    statusOverlay.textContent = 'Gravação salva no celular';
+  };
+  mediaRecorder.start(1000);
+  recordStart.disabled = true;
+  recordStop.disabled = false;
+  statusOverlay.textContent = '⏺ Gravando câmera...';
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+}
+
+// ============================================================
+// DETECTOR ARUCO
+// ============================================================
+
+// Dicionário ARUCO (7×7, 1023 códigos) - melhor custo-benefício entre
+// robustez e quantidade de IDs disponíveis. Resistente a falsos positivos.
+// Tamanho mínimo recomendado do marcador a 40 cm: ~3 cm × 3 cm na peça física.
+// Isso garante aproximadamente 50-80 pixels na imagem a 640×480.
+const detector = new AR.Detector({ dictionaryName: 'ARUCO' });
+
+// ============================================================
+// REALCE DE CONTRASTE (compensa blur da câmera)
+// ============================================================
+
+function enhanceImage(img) {
+  // Estica o histograma para melhorar detecção em imagens borradas
+  const d = img.data, len = d.length;
+  let min = 255, max = 0;
+  for (let i = 0; i < len; i += 4) {
+    const g = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+    if (g < min) min = g;
+    if (g > max) max = g;
+  }
+  const range = max - min;
+  if (range < 5 || range > 240) return;
+  const scale = 255 / range;
+  for (let i = 0; i < len; i += 4) {
+    d[i] = ((d[i] - min) * scale) | 0;
+    d[i+1] = ((d[i+1] - min) * scale) | 0;
+    d[i+2] = ((d[i+2] - min) * scale) | 0;
+  }
+}
+
+// ============================================================
+// FUNÇÃO PRINCIPAL DE DETECÇÃO
+// ============================================================
+
+function findScreenCenter(imageData) {
+  // Abordagem: centro da tela por projeção → varre do centro pra fora
+  // com gradiente para achar a transição exata branco→preto.
+  const w = imageData.width, h = imageData.height, d = imageData.data;
+  const total = w * h;
+  const gray = new Uint8Array(total);
+  for (let i = 0; i < total; i++) {
+    gray[i] = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114) | 0;
+  }
+  // Centro aproximado por projeção (subamostragem 8×)
+  const hProj = new Uint32Array(h);
+  for (let y = 0; y < h; y++) {
+    let s = 0; const off = y * w;
+    for (let x = 0; x < w; x += 8) s += gray[off + x] > 120 ? 1 : 0;
+    hProj[y] = s;
+  }
+  const vProj = new Uint32Array(w);
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = 0; y < h; y += 8) s += gray[y * w + x] > 120 ? 1 : 0;
+    vProj[x] = s;
+  }
+  let maxV = 0, cx = 0;
+  for (let x = 0; x < w; x++) { if (vProj[x] > maxV) { maxV = vProj[x]; cx = x; } }
+  let maxH = 0, cy = 0;
+  for (let y = 0; y < h; y++) { if (hProj[y] > maxH) { maxH = hProj[y]; cy = y; } }
+  const hSamp = Math.ceil(w / 8), vSamp = Math.ceil(h / 8);
+  if (maxV < vSamp * 0.2 || maxH < hSamp * 0.2) return null;
+  if (gray[cy * w + cx] < 120) return null;
+  // Brilho médio no centro (região 20%×20%)
+  const rw = (w * 0.1) | 0, rh = (h * 0.1) | 0;
+  let sumB = 0, cntB = 0;
+  for (let y = cy - rh; y < cy + rh; y++) {
+    const off = y * w;
+    for (let x = cx - rw; x < cx + rw; x++) { sumB += gray[off + x]; cntB++; }
+  }
+  if (cntB === 0) return null;
+  const avgBright = sumB / cntB;
+  if (avgBright < 150) return null;
+  // Threshold = 30% do brilho médio da tela
+  const thr = avgBright * 0.30;
+  // Varre do centro pra fora em cada direção, 7 sondas paralelas
+  // Para cada sonda: acha o MAIOR gradiente próximo ao threshold
+  const scanOut = (fromX, fromY, ddx, ddy, probes, maxSteps) => {
+    const hits = [];
+    const probeStep = (ddx !== 0 ? w : h) * 0.07;
+    for (let p = 0; p < probes; p++) {
+      const off = (p - (probes - 1) / 2);
+      const sx = (fromX + (ddy === 0 ? off * probeStep : 0)) | 0;
+      const sy = (fromY + (ddx === 0 ? off * probeStep : 0)) | 0;
+      if (sx < 2 || sx >= w - 2 || sy < 2 || sy >= h - 2) continue;
+      let bestGrad = 0, bestPos = -1;
+      for (let s = 0; s < maxSteps; s++) {
+        const x = sx + ddx * s, y = sy + ddy * s;
+        if (x < 2 || x >= w - 2 || y < 2 || y >= h - 2) break;
+        const curr = gray[y * w + x];
+        // Só considera gradiente próximo ao threshold (na transição)
+        if (curr < thr + 30 && curr > thr - 30) {
+          const g = ddx !== 0
+            ? Math.abs(gray[y * w + x] - gray[y * w + x - ddx])
+            : Math.abs(gray[y * w + x] - gray[(y - ddy) * w + x]);
+          if (g > bestGrad) { bestGrad = g; bestPos = ddx !== 0 ? x : y; }
+        }
+      }
+      if (bestGrad > 10) hits.push(bestPos);
+    }
+    if (hits.length < 3) return -1;
+    hits.sort((a, b) => a - b);
+    return hits[(hits.length / 2) | 0];
+  };
+  const top = scanOut(cx, cy, 0, -1, 7, cy + 1);
+  const bot = scanOut(cx, cy, 0, 1, 7, h - cy);
+  const left = scanOut(cx, cy, -1, 0, 7, cx + 1);
+  const right = scanOut(cx, cy, 1, 0, 7, w - cx);
+  if (top < 0 || bot < 0 || left < 0 || right < 0) return null;
+  if (right - left < w * 0.15 || bot - top < h * 0.15) return null;
+  return {
+    x: ((left + right) / 2) / w,
+    y: ((top + bot) / 2) / h,
+    top: top / h, bottom: bot / h,
+    left: left / w, right: right / w,
+    c1: { x: left / w, y: top / h },
+    c2: { x: right / w, y: top / h },
+    c3: { x: right / w, y: bot / h },
+    c4: { x: left / w, y: bot / h }
+  };
+}
+
+function detectLoop() {
+  if (!state.running) return;
+
+  try {
+    const startTime = performance.now();
+
+    // 1. Captura frame da câmera
+    snap();
+
+    // 2. Obtém imagem para detecção
+    const imageData = offCtx.getImageData(0, 0, W, H);
+    // Realça contraste para compensar blur
+    enhanceImage(imageData);
+
+    // 3. Detecta marcadores ArUco
+    //    A biblioteca js-aruco2 implementa o mesmo algoritmo de
+    //    ArUco do OpenCV contrib: threshold adaptativo, extração de
+    //    contornos, codificação binária 7×7, correção de erros Hamming.
+    const markers = detector.detect(imageData);
+    const now = Date.now();
+
+    // 3b. Detecta centro da tela por projeção de pixels claros (sem ArUco)
+    //     Varre a imagem procurando a região clara (tela) cercada por borda escura (monitor).
+    state.screenCenter = findScreenCenter(imageData);
+    if (state.screenCenter) {
+      state.screenCenterX = state.screenCenter.x;
+      state.screenCenterY = state.screenCenter.y;
+    } else {
+      state.screenCenterX = null;
+      state.screenCenterY = null;
+    }
+
+    // 4. Para cada marcador detectado, atualiza o tracker
+    //    Os trackers são criados automaticamente para novos IDs.
+    const detectedIds = [];
+
+    for (let m = 0; m < markers.length; m++) {
+      const marker = markers[m];
+      const id = marker.id;
+      detectedIds.push(id);
+
+      // Calcula centróide: centro geométrico dos 4 cantos
+      const c = marker.corners;
+      const cx = (c[0].x + c[1].x + c[2].x + c[3].x) / 4;
+      const cy = (c[0].y + c[1].y + c[2].y + c[3].y) / 4;
+
+      // Obtém ou cria tracker para este ID
+      const piece = getPiece(id);
+
+      // Adiciona posição com suavização
+      piece.addPosition(cx / W, cy / H, c, now);
+
+      // Aplica calibração se disponível
+      if (state.calibrated) {
+        piece.applyCalibration(state.transformMatrix);
+      }
+    }
+
+    // 5. Marca como perdidos os IDs não detectados neste frame
+    for (const id in pieces) {
+      if (!detectedIds.includes(parseInt(id))) {
+        pieces[id].markLost(now);
+      }
+    }
+
+    // 6. Remove trackers perdidos há mais de 10s (limpeza)
+    for (const id in pieces) {
+      if (pieces[id].status === 'lost' && now - pieces[id].lastSeen > 10000) {
+        if (pieces[id].trail.length === 0) {
+          delete pieces[id];
+        }
+      }
+    }
+
+    // 7. Cálculo de FPS
+    state.frameCount++;
+    const fpsElapsed = now - state.lastFpsTime;
+    if (fpsElapsed >= 1000) {
+      state.fps = Math.round(state.frameCount * 1000 / fpsElapsed);
+      state.frameCount = 0;
+      state.lastFpsTime = now;
+    }
+
+    // 8. Atualiza painel
+    updatePanel(now);
+
+    // 8b. Envia estado para Firestore (PC) a cada 500ms
+    if (now - state.lastTrackTs > 500) {
+      state.lastTrackTs = now;
+      const trackData = {};
+      for (let m = 0; m < markers.length; m++) {
+        const mk = markers[m];
+        const c = mk.corners;
+        const corns = [
+          Math.round(c[0].x) + ',' + Math.round(c[0].y),
+          Math.round(c[1].x) + ',' + Math.round(c[1].y),
+          Math.round(c[2].x) + ',' + Math.round(c[2].y),
+          Math.round(c[3].x) + ',' + Math.round(c[3].y)
+        ];
+        const piece = pieces[mk.id];
+        trackData['m' + mk.id] = {
+          score: piece ? Math.round((1 - piece.consecutiveLost / 5) * 100) : 0,
+          ts: now,
+          corners: corns
+        };
+      }
+      db.collection('tracking').doc('state').set({
+        markers: trackData,
+        center: {
+          x: state.screenCenterX, y: state.screenCenterY, detected: !!state.screenCenter,
+          c1: state.screenCenter ? state.screenCenter.c1 : null,
+          c2: state.screenCenter ? state.screenCenter.c2 : null,
+          c3: state.screenCenter ? state.screenCenter.c3 : null,
+          c4: state.screenCenter ? state.screenCenter.c4 : null
+        },
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(function(){console.log('Firestore OK',trackData)}).catch(function(e){console.error('Firestore erro:',e)});
+    }
+
+    // 9. Desenha overlay
+    drawOverlay(markers, now);
+
+    // 10. Atualiza status
+    updateStatus(markers, now);
+
+    // 11. Calcula tempo do frame e agenda próximo
+    const elapsed = performance.now() - startTime;
+    const delay = Math.max(10, TRACK_INTERVAL - elapsed);
+    setTimeout(detectLoop, delay);
+
+  } catch (e) {
+    statusOverlay.textContent = '⚠️ Erro: ' + e.message;
+    setTimeout(detectLoop, TRACK_INTERVAL);
+  }
+}
+
+// ============================================================
+// DESENHO DO OVERLAY
+// ============================================================
+
+function drawOverlay(markers, now) {
+  const Wv = overlay.width;
+  const Hv = overlay.height;
+  const sw = Wv / W;  // Escala: canvas → tela
+  const sh = Hv / H;
+
+  ox.clearRect(0, 0, Wv, Hv);
+
+  // == 1. DESENHA RASTRO DE MOVIMENTO (TRAIL) ==
+  // Para cada peça rastreada, desenha o histórico de posições como
+  // uma linha que vai ficando mais transparente com o tempo.
+  for (const id in pieces) {
+    const piece = pieces[id];
+    const trail = piece.trail;
+    if (trail.length < 2) continue;
+
+    ox.lineCap = 'round';
+    ox.lineJoin = 'round';
+
+    for (let t = 1; t < trail.length; t++) {
+      const p0 = trail[t - 1];
+      const p1 = trail[t];
+      const age = now - p1.ts;
+      const alpha = Math.max(0, 1 - age / TRAIL_FADE_MS);
+      if (alpha <= 0) continue;
+
+      // Cor baseada no ID (paleta fixa)
+      const hue = (piece.id * 70 + 120) % 360;
+      ox.strokeStyle = `hsla(${hue}, 80%, 55%, ${alpha * 0.6})`;
+      ox.lineWidth = Math.max(1, 4 * alpha);
+      ox.beginPath();
+      ox.moveTo(p0.x * Wv, p0.y * Hv);
+      ox.lineTo(p1.x * Wv, p1.y * Hv);
+      ox.stroke();
+    }
+
+    // Remove pontos muito antigos do trail
+    while (trail.length > 1 && now - trail[0].ts > TRAIL_FADE_MS) {
+      trail.shift();
+    }
+  }
+
+  // == 2. DESENHA MARCADORES DETECTADOS ==
+  for (let m = 0; m < markers.length; m++) {
+    const marker = markers[m];
+    const c = marker.corners;
+
+    // Coordenadas dos cantos em pixels da tela
+    const pts = c.map(p => ({ x: p.x * sw, y: p.y * sh }));
+
+    // 2a. Quadrado verde envolvendo o marcador
+    ox.strokeStyle = 'rgba(60, 220, 120, 0.85)';
+    ox.lineWidth = 3;
+    ox.shadowColor = 'rgba(60, 220, 120, 0.3)';
+    ox.shadowBlur = 12;
+    ox.beginPath();
+    ox.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) ox.lineTo(pts[i].x, pts[i].y);
+    ox.closePath();
+    ox.stroke();
+    ox.shadowBlur = 0;
+
+    // 2b. Pontos amarelos nos 4 cantos
+    for (let i = 0; i < 4; i++) {
+      ox.fillStyle = 'rgba(255, 220, 60, 0.9)';
+      ox.shadowColor = 'rgba(255, 220, 60, 0.4)';
+      ox.shadowBlur = 8;
+      ox.beginPath();
+      ox.arc(pts[i].x, pts[i].y, 5, 0, Math.PI * 2);
+      ox.fill();
+    }
+    ox.shadowBlur = 0;
+
+    // Centróide do marcador
+    const cx2 = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+    const cy2 = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+
+    // 2c. Círculo vermelho no centro da peça
+    ox.strokeStyle = 'rgba(255, 60, 60, 0.5)';
+    ox.lineWidth = 3;
+    ox.beginPath();
+    ox.arc(cx2, cy2, 20, 0, Math.PI * 2);
+    ox.stroke();
+
+    // Ponto vermelho central
+    ox.fillStyle = 'rgba(255, 60, 60, 0.9)';
+    ox.shadowColor = 'rgba(255, 60, 60, 0.4)';
+    ox.shadowBlur = 10;
+    ox.beginPath();
+    ox.arc(cx2, cy2, 4, 0, Math.PI * 2);
+    ox.fill();
+    ox.shadowBlur = 0;
+
+    // 2d. Cruz central (crosshair)
+    ox.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ox.lineWidth = 1.5;
+    ox.setLineDash([4, 6]);
+    ox.beginPath();
+    ox.moveTo(cx2 - 28, cy2); ox.lineTo(cx2 + 28, cy2);
+    ox.moveTo(cx2, cy2 - 28); ox.lineTo(cx2, cy2 + 28);
+    ox.stroke();
+    ox.setLineDash([]);
+
+    // 2e. Label ID + distância Hamming
+    ox.fillStyle = 'rgba(60, 220, 120, 0.95)';
+    ox.font = 'bold 16px system-ui';
+    ox.textAlign = 'center';
+    ox.textBaseline = 'bottom';
+    ox.shadowColor = 'rgba(0,0,0,0.6)';
+    ox.shadowBlur = 6;
+    ox.fillText('ID ' + marker.id, cx2, cy2 - 28);
+
+    // Posição normalizada (se calibrado) ou bruta
+    const piece = pieces[marker.id];
+    if (piece && state.calibrated) {
+      ox.fillStyle = 'rgba(255, 220, 60, 0.9)';
+      ox.font = 'bold 13px system-ui';
+      ox.textBaseline = 'top';
+      ox.fillText(`${Math.round(piece.normX)}%, ${Math.round(piece.normY)}%`, cx2, cy2 + 28);
+    }
+    ox.shadowBlur = 0;
+  }
+
+  // == 3. CENTRO + 4 CANTOS DA TELA (detecção visual) ==
+  if (state.screenCenterX != null && state.screenCenterY != null && state.screenCenter) {
+    const px = state.screenCenterX * Wv, py = state.screenCenterY * Hv;
+    const sc = state.screenCenter;
+    // 3a. Retângulo tracejado da tela
+    ox.strokeStyle = 'rgba(100,200,255,0.35)'; ox.lineWidth = 2; ox.setLineDash([6, 8]);
+    ox.strokeRect(sc.left * Wv, sc.top * Hv, (sc.right - sc.left) * Wv, (sc.bottom - sc.top) * Hv);
+    ox.setLineDash([]);
+    // 3b. 4 cantos numerados (c1..c4)
+    const cornerLabels = ['1', '2', '3', '4'];
+    const cornerColors = ['#f44336', '#2196f3', '#4caf50', '#ff9800'];
+    for (let i = 0; i < 4; i++) {
+      const c = sc['c' + (i + 1)];
+      if (!c) continue;
+      const cpx = c.x * Wv, cpy = c.y * Hv;
+      // Círculo com cor
+      ox.fillStyle = cornerColors[i];
+      ox.shadowColor = 'rgba(0,0,0,0.4)'; ox.shadowBlur = 12;
+      ox.beginPath(); ox.arc(cpx, cpy, 14, 0, Math.PI * 2); ox.fill();
+      ox.shadowBlur = 0;
+      // Número branco
+      ox.fillStyle = '#fff'; ox.font = 'bold 14px system-ui';
+      ox.textAlign = 'center'; ox.textBaseline = 'middle';
+      ox.fillText(cornerLabels[i], cpx, cpy);
+      // Label abaixo
+      const posLabels = ['SE', 'SD', 'ID', 'IE'];
+      ox.fillStyle = 'rgba(255,255,255,0.8)'; ox.font = '11px system-ui';
+      ox.textBaseline = 'top';
+      ox.fillText(posLabels[i], cpx, cpy + 18);
+    }
+    // 3c. Glow laranja no centro
+    const grad = ox.createRadialGradient(px, py, 0, px, py, 80);
+    grad.addColorStop(0, 'rgba(255,152,0,0.4)'); grad.addColorStop(1, 'rgba(255,152,0,0)');
+    ox.fillStyle = grad; ox.beginPath(); ox.arc(px, py, 80, 0, Math.PI * 2); ox.fill();
+    // 3d. Círculo externo
+    ox.strokeStyle = 'rgba(255,152,0,0.8)'; ox.lineWidth = 3;
+    ox.shadowColor = 'rgba(255,152,0,0.3)'; ox.shadowBlur = 20;
+    ox.beginPath(); ox.arc(px, py, 35, 0, Math.PI * 2); ox.stroke();
+    // 3e. Cruz
+    ox.strokeStyle = 'rgba(255,152,0,0.9)'; ox.lineWidth = 2.5;
+    ox.beginPath(); ox.moveTo(px - 50, py); ox.lineTo(px + 50, py);
+    ox.moveTo(px, py - 50); ox.lineTo(px, py + 50); ox.stroke();
+    // 3f. Ponto central
+    ox.fillStyle = '#ff9800'; ox.shadowBlur = 15;
+    ox.beginPath(); ox.arc(px, py, 6, 0, Math.PI * 2); ox.fill();
+    ox.shadowBlur = 0;
+    // Label
+    ox.fillStyle = '#fff'; ox.font = 'bold 14px system-ui'; ox.textAlign = 'center'; ox.textBaseline = 'bottom';
+    ox.shadowColor = 'rgba(0,0,0,0.7)'; ox.shadowBlur = 6;
+    ox.fillText('🎯 CENTRO', px, py - 42);
+    if (state.calibrated) {
+      const nx = Math.round(state.screenCenterX * 100), ny = Math.round(state.screenCenterY * 100);
+      ox.fillText(nx + '%, ' + ny + '%', px, py + 42);
+    }
+    ox.shadowBlur = 0;
+  }
+}
+
+// ============================================================
+// ATUALIZAÇÃO DO PAINEL
+// ============================================================
+
+function updatePanel(now) {
+  // FPS
+  dFps.textContent = state.fps ? state.fps + ' fps' : '—';
+
+  // Status geral
+  const detectedCount = Object.values(pieces).filter(p => p.status === 'detected').length;
+  dCount.textContent = detectedCount;
+
+  // Estado da calibração
+  if (state.calibrated) {
+    dCalib.innerHTML = '<span class="badge g">Calibrado</span>';
+  } else if (state.calibPoints.length > 0) {
+    dCalib.innerHTML = `<span class="badge y">${state.calibPoints.length}/4 pontos</span>`;
+  } else {
+    dCalib.innerHTML = '<span class="badge y">Pendente</span>';
+  }
+
+  // Resolução
+  dRes.textContent = W + '×' + H;
+
+  // Lista de peças detectadas
+  let html = '';
+  const activePieces = Object.values(pieces).filter(p => p.status === 'detected');
+
+  if (activePieces.length === 0) {
+    html = '<div style="color:#999;font-size:13px;padding:16px 0;text-align:center">Nenhuma peça detectada ainda</div>';
+  } else {
+    for (const p of activePieces) {
+      const xPx = Math.round(p.smoothedX * W);
+      const yPx = Math.round(p.smoothedY * H);
+      html += `<div class="piece-card">
+        <h3>🧩 Peça ${p.id} <span class="badge g">OK</span></h3>
+        <div class="row"><span>X</span><span class="val">${xPx} px</span></div>
+        <div class="row"><span>Y</span><span class="val">${yPx} px</span></div>
+        ${state.calibrated ? `<div class="row"><span>Norm X</span><span class="val">${Math.round(p.normX)}%</span></div>
+        <div class="row"><span>Norm Y</span><span class="val">${Math.round(p.normY)}%</span></div>` : ''}
+        <div class="row"><span>Suavização</span><span class="val">${SMOOTH_WINDOW} quadros</span></div>
+      </div>`;
+    }
+  }
+  piecesList.innerHTML = html;
+}
+
+// ============================================================
+// ATUALIZAÇÃO DO STATUS
+// ============================================================
+
+function updateStatus(markers, now) {
+  const detectedIds = Object.keys(pieces).filter(id => pieces[id].status === 'detected');
+  const lostIds = Object.keys(pieces).filter(id => pieces[id].status === 'lost');
+
+  if (markers.length > 0) {
+    state.status = 'detectado';
+    const ids = markers.map(m => m.id).join(', ');
+    statusOverlay.textContent = `🎯 ${markers.length} peça(s): ID ${ids}  •  ${state.fps} FPS`;
+    dStatus.innerHTML = '<span class="status-dot ok"></span>Detectado';
+  } else if (lostIds.length > 0) {
+    state.status = 'perdido';
+    statusOverlay.textContent = `👀 ${lostIds.length} peça(s) perdida(s) — reposicione`;
+    dStatus.innerHTML = '<span class="status-dot lost"></span>Perdido';
+  } else {
+    state.status = 'aguardando';
+    statusOverlay.textContent = `📷 Aguardando marcador ArUco • ${state.fps} FPS`;
+    dStatus.innerHTML = '<span class="status-dot lost"></span>Aguardando';
+  }
+}
+
+// ============================================================
+// CALIBRAÇÃO
+// ============================================================
+
+// A calibração permite mapear coordenadas da câmera para coordenadas
+// da tela (0-100%). O usuário toca em "Calibrar" e posiciona o marcador
+// nos 4 cantos da tela (mostrados como alvos laranja).
+// Após coletar os 4 pontos, o sistema calcula a matriz de transformação
+// perspectiva e todas as posições passam a ser exibidas em % da tela.
+
+function startCalibration() {
+  if (state.calibrated) {
+    // Reset para recalibrar
+    state.calibrated = false;
+    state.calibPoints = [];
+    state.calibStep = 0;
+    state.transformMatrix = null;
+    for (const id in pieces) {
+      pieces[id].normX = 0;
+      pieces[id].normY = 0;
+    }
+    calibBtn.textContent = '📍 CALIBRAR';
+    calibOverlay.style.display = 'block';
+    return;
+  }
+
+  state.calibMode = true;
+  state.calibPoints = [];
+  state.calibStep = 0;
+  calibOverlay.style.display = 'block';
+  calibBtn.textContent = `📍 Ponto ${state.calibStep + 1}/4`;
+  camstartStatus.textContent = `Posicione o marcador no alvo ${state.calibStep + 1} e toque em CALIBRAR`;
+}
+
+function calibrationClick() {
+  if (!state.calibMode && !state.calibrated) {
+    startCalibration();
+    return;
+  }
+
+  if (state.calibrated) {
+    startCalibration(); // Recalibrar
+    return;
+  }
+
+  // Obtém o primeiro marcador detectado como ponto de referência
+  const markers = detector.detect(offCtx.getImageData(0, 0, W, H));
+  if (markers.length === 0) {
+    alert('Nenhum marcador detectado. Posicione o ArUco no alvo.');
+    return;
+  }
+
+  // Usa o primeiro marcador (ou o de ID mais próximo do passo)
+  const marker = markers[0];
+  const c = marker.corners;
+  const cx = (c[0].x + c[1].x + c[2].x + c[3].x) / 4;
+  const cy = (c[0].y + c[1].y + c[2].y + c[3].y) / 4;
+
+  state.calibPoints.push([cx / W, cy / H]);
+  state.calibStep++;
+
+  if (state.calibStep >= 4) {
+    // Calcula matriz de transformação
+    const src = state.calibPoints;
+    const dst = CALIB_CORNERS;
+    state.transformMatrix = computePerspectiveTransform(src, dst);
+
+    if (state.transformMatrix) {
+      state.calibrated = true;
+      state.calibMode = false;
+      calibOverlay.style.display = 'none';
+      calibBtn.textContent = '🔄 RECALIBRAR';
+      camstartStatus.textContent = 'Calibração concluída!';
+      dCalib.innerHTML = '<span class="badge g">Calibrado</span>';
+    } else {
+      alert('Erro ao calcular transformação. Tente novamente.');
+      state.calibPoints = [];
+      state.calibStep = 0;
+      calibBtn.textContent = '📍 Ponto 1/4';
+    }
+  } else {
+    calibBtn.textContent = `📍 Ponto ${state.calibStep + 1}/4`;
+  }
+}
+
+// ============================================================
+// INICIALIZAÇÃO DA CÂMERA
+// ============================================================
+
+function startCamera() {
+  camstartStatus.textContent = '▶▶';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    camstartStatus.textContent = '❌ Sem suporte a câmera';
+    return;
+  }
+
+  const constraints = {
+    video: {
+      facingMode: 'environment',
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+  // Tenta foco contínuo (funciona em Chrome Android)
+  if (navigator.mediaDevices.getSupportedConstraints().focusMode) {
+    constraints.video.advanced = [{ focusMode: 'continuous' }];
+  }
+  navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+    cameraStream = stream;
+    cam.srcObject = stream;
+    cam.play();
+    camstart.style.display = 'none';
+    state.running = true;
+    state.lastFpsTime = Date.now();
+
+    // Tenta travar orientação landscape
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(function(){});
+    }
+
+    // Mostra botões
+    calibBtn.style.display = 'block';
+    document.getElementById('flip-btn').style.display = 'flex';
+    recordControls.style.display = 'flex';
+
+    setTimeout(detectLoop, 500);
+  }).catch(e => {
+    camstartStatus.textContent = '❌ ' + e.message;
+  });
+}
+
+// ============================================================
+// EVENTOS
+// ============================================================
+
+startBtn.addEventListener('click', startCamera);
+calibBtn.addEventListener('click', calibrationClick);
+recordStart.addEventListener('click', startRecording);
+recordStop.addEventListener('click', stopRecording);
+
+// Tecla 'c' para calibrar
+document.addEventListener('keydown', e => {
+  if (e.key === 'c' || e.key === 'C') calibrationClick();
+});
+
+// ============================================================
+// INFORMAÇÕES TÉCNICAS (exibidas no console)
+// ============================================================
+
+console.log(`
+╔══════════════════════════════════════════════════════╗
+║           DETECTOR ARUCO — GUIA TÉCNICO              ║
+╠══════════════════════════════════════════════════════╣
+║                                                      ║
+║   DISTÂNCIA:               35-50 cm (ideal 40 cm)    ║
+║   MARCADOR MÍNIMO:         3×3 cm na peça física     ║
+║   RESOLUÇÃO CÂMERA:        640×480 (mínima)          ║
+║   PIXELS NO MARCADOR:      ~50-80 px (detecção       ║
+║                            robusta acima de 40px)    ║
+║   DICIONÁRIO ARUCO:        ARUCO (7×7, 1023 ids,    ║
+║                            dist. Hamming mín. 3)     ║
+║   DETECTOR:                threshold adaptativo       ║
+║                            + contorno hierárquico     ║
+║                            + cod. binária 7×7        ║
+║                            + correção Hamming tau=3  ║
+║   SUAVIZAÇÃO:              Média móvel ${SMOOTH_WINDOW} quadros     ║
+║   ZONA MORTA:              ${DEAD_ZONE*100}% da tela                  ║
+║   ARQUITETURA:             Multi-peça (trackers      ║
+║                            criados automaticamente)  ║
+║                                                      ║
+║   Por que ARUCO (7×7) e não DICT_4X4 ou 6X6?        ║
+║   → O dicionário ARUCO (7×7, 25 bits) oferece       ║
+║     o melhor equilíbrio entre:                      ║
+║     • Tamanho do marcador (cabe em peças de 3cm)    ║
+║     • Robustez a falsos positivos (Hamming ≥ 3)     ║
+║     • Quantidade de IDs (1023 — escala para         ║
+║       dezenas de peças)                             ║
+║     • Detecção em múltiplas rotações (invariante)   ║
+║                                                      ║
+╚══════════════════════════════════════════════════════╝
+`);
+</script>
+</body>
+</html>

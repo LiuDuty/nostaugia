@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
+<title>Puzzle Camera</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#cam{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+#cv{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#flash{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at center,rgba(60,140,255,0.15),transparent 60%);pointer-events:none;opacity:0;z-index:4}
+#status{position:fixed;top:5%;left:10%;right:10%;text-align:center;pointer-events:none;z-index:5;color:#fff;font:bold 16px/1.4 Georgia,serif;text-shadow:0 0 20px rgba(0,0,0,0.8);transition:opacity 0.5s;background:rgba(0,0,0,0.6);padding:10px 20px;border-radius:20px}
+#flipbtn{position:fixed;bottom:5%;right:5%;z-index:10;color:rgba(255,255,255,0.5);font:bold 13px/1 Georgia,serif;cursor:pointer;background:rgba(0,0,0,0.4);padding:10px 16px;border-radius:20px;border:1px solid rgba(255,255,255,0.15);-webkit-tap-highlight-color:transparent}
+#startbtn{position:fixed;bottom:20%;left:50%;transform:translateX(-50%);z-index:15;padding:20px 60px;border:none;border-radius:30px;background:rgba(60,220,120,0.9);color:#fff;font:bold 22px/1 Georgia,serif;letter-spacing:3px;cursor:pointer;box-shadow:0 4px 30px rgba(0,0,0,0.6);display:none;text-transform:uppercase}
+#startbtn:active{transform:translateX(-50%) scale(0.95)}
+#confirmbtn{position:fixed;bottom:10%;left:50%;transform:translateX(-50%);z-index:15;padding:16px 50px;border:none;border-radius:30px;background:rgba(255,200,60,0.9);color:#000;font:bold 20px/1 Georgia,serif;letter-spacing:2px;cursor:pointer;box-shadow:0 4px 30px rgba(0,0,0,0.6);display:none;text-transform:uppercase}
+#confirmbtn:active{transform:translateX(-50%) scale(0.95)}
+#camstart{position:fixed;top:0;left:0;width:100%;height:100%;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0e1a;color:#fff;font:18px/1.6 Georgia,serif;text-align:center;gap:20px;padding:30px}
+#reload{position:fixed;bottom:5%;left:5%;z-index:40;color:#fff;font:bold 30px/1 Georgia,serif;cursor:pointer;background:rgba(255,255,255,0.1);padding:8px 16px;border-radius:20px;border:1px solid rgba(255,255,255,0.15);-webkit-tap-highlight-color:transparent;display:block}
+#nocam{position:fixed;top:0;left:0;width:100%;height:100%;display:none;flex-direction:column;align-items:center;justify-content:center;background:#0a0e1a;color:#fff;z-index:20;padding:30px;font:16px/1.6 Georgia,serif;text-align:center;gap:15px}
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="cv"></canvas>
+<div id="flash"></div>
+<div id="status">Iniciando...</div>
+<div id="flipbtn" onclick="flipped=!flipped;document.getElementById('cam').style.transform=flipped?'rotate(180deg)':'';document.getElementById('cv').style.transform=flipped?'rotate(180deg)':''">↻ virar</div>
+<button id="startbtn">INICIAR JOGO</button>
+<button id="confirmbtn">✓ CONFIRMAR</button>
+<div id="camstart">
+  <div style="font-size:50px">📷</div>
+  <div id="camstatus">Toque no botão para ligar a câmera</div>
+  <button id="startcambtn" onclick="var el=document.getElementById('camstatus');el.textContent='▶▶';try{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)el.textContent='❌ sem getUserMedia';else navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:480},height:{ideal:360}}}).then(function(s){cam.srcObject=s;cam.play();document.getElementById('camstart').style.display='none';st.textContent='Câmera OK';setTimeout(waitCam,500)}).catch(function(e){el.textContent='❌ '+e.message})}catch(e){el.textContent='❌ '+e.message}" style="padding:22px 60px;border:none;border-radius:40px;background:rgba(60,200,255,0.95);color:#000;font:bold 22px/1 Georgia,serif;cursor:pointer;box-shadow:0 4px 30px rgba(0,0,0,0.5);-webkit-tap-highlight-color:transparent">▶ LIGAR CÂMERA v14</button>
+  <div style="font-size:13px;color:rgba(255,255,255,0.4)">O Chrome pede permissão após o toque</div>
+</div>
+<div id="reload" onclick="location.href='phone.html?v='+Date.now()">🔄</div>
+<div id="nocam">
+  <div style="font-size:40px">📷</div>
+  <div>Sem acesso à câmera!</div>
+  <div style="font-size:14px;color:rgba(100,200,255,0.6)">Abra no <b>Chrome</b>, não no WhatsApp.</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<!-- Global vars/functions accessible from onclick -->
+<script>
+var W=80,H=60,cam=document.getElementById('cam'),cv=document.getElementById('cv'),cx=cv.getContext('2d'),st=document.getElementById('status'),flash=document.getElementById('flash');
+var off=document.createElement('canvas');off.width=W;off.height=H;var ctx=off.getContext('2d');
+var mode='calibrate',calibIdx=0,flipped=false,bbMinX=0,bbMaxX=W-1,bbMinY=0,bbMaxY=H-1;
+var ref=[],lastSent=0,persist=0,persistPiece=0,cooldown=1500,total=9,state={},piecePos=[];
+for(var i=1;i<=9;i++)state[i]=false;
+function resize(){cv.width=innerWidth;cv.height=innerHeight}
+resize();addEventListener('resize',resize);
+function snapCam(){if(flipped){ctx.save();ctx.translate(W/2,H/2);ctx.rotate(Math.PI);ctx.drawImage(cam,-W/2,-H/2,W,H);ctx.restore()}else ctx.drawImage(cam,0,0,W,H)}
+document.getElementById('camstatus').textContent='Toque no botão para ligar a câmera v14 ✓';
+var db;
+try{
+  firebase.initializeApp({
+    apiKey:"AIzaSyCbPmZUKW7l14KswgdoioRI6nuZ2lo8zkg",
+    authDomain:"infinitepuzze.firebaseapp.com",
+    projectId:"infinitepuzze",
+    storageBucket:"infinitepuzze.firebasestorage.app",
+    messagingSenderId:"65481405676",
+    appId:"1:65481405676:web:96952f779fa779ef9d21c9"
+  });
+  db=firebase.firestore();
+}catch(e){st.textContent='Firebase: '+e.message}
+</script>
+<script>
+st.textContent='✓ Script 2 carregado';
+function waitCam(){
+  try{
+    snapCam();
+    let img=ctx.getImageData(0,0,W,H);
+    if(img.data.every(v=>v===0)){setTimeout(waitCam,200);return}
+    st.textContent='3s calibrando brilho... sem dedo';
+    let acc=[];for(let i=0;i<9;i++)acc[i]=0;
+    let cnt=0;
+    function snapCal(){
+      snapCam();
+      let d=ctx.getImageData(0,0,W,H).data;
+      for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){
+        let p=Math.floor(y/(H/3))*3+Math.floor(x/(W/3));
+        let pi=(y*W+x)*4;
+        acc[p]+=d[pi]+d[pi+1]+d[pi+2];ref[p]=(ref[p]||0)+1;
+      }
+      cnt++;
+      if(cnt>=3){
+        for(let i=0;i<9;i++)ref[i]=acc[i]/ref[i];
+        calibIdx=0;mode='calibrate';
+        st.textContent='🔍 Detectando peças na tela...';
+        detectLoop();
+      }else setTimeout(snapCal,1000);
+    }
+    snapCal();
+  }catch(e){st.textContent='❌ waitCam: '+e.message;setTimeout(function(){st.textContent='Tente novamente - aperte 🔄 e depois o botão'},2000)}
+}
+}
+
+// Find the exact pixel where the finger is touching
+function findFinger(d){
+  let best={x:-1,y:-1,score:0};
+  for(let y=0;y<H;y+=1)for(let x=0;x<W;x+=1){
+    let pi=(y*W+x)*4;
+    if(!isSkin(d[pi],d[pi+1],d[pi+2]))continue;
+    let bri=(d[pi]+d[pi+1]+d[pi+2])/3;
+    // check which region this pixel belongs to, use that region's ref
+    let p=Math.floor(y/(H/3))*3+Math.floor(x/(W/3));
+    let drop=ref[p]-bri;
+    let score=drop*2+1; // weight brightness drop
+    if(score>best.score){best={x,y,score}}
+  }
+  return best.score>3?best:null;
+}
+
+function isTeal(r,g,b){
+  let max=Math.max(r,g,b),min=Math.min(r,g,b),delta=max-min;
+  if(delta===0)return false;
+  let s=delta/max,v=max/255;
+  let h=0;
+  if(max===r)h=60*(((g-b)/delta)%6);
+  else if(max===g)h=60*((b-r)/delta+2);
+  else h=60*((r-g)/delta+4);
+  if(h<0)h+=360;
+  return h>=70&&h<=220&&s>0.04&&s<0.9&&v>0.15;
+}
+
+function findTealCluster(d){
+  // find the largest cluster of teal pixels
+  let visited=new Uint8Array(W*H);
+  let best={x:0,y:0,size:0};
+  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){
+    let i=y*W+x;
+    if(visited[i])continue;
+    let pi=i*4;
+    if(!isTeal(d[pi],d[pi+1],d[pi+2]))continue;
+    let stack=[[x,y]],pixels=[];
+    while(stack.length){
+      let [px,py]=stack.pop();
+      let idx=py*W+px;
+      if(px<0||px>=W||py<0||py>=H||visited[idx])continue;
+      let pi2=idx*4;
+      if(!isTeal(d[pi2],d[pi2+1],d[pi2+2]))continue;
+      visited[idx]=1;pixels.push([px,py]);
+      stack.push([px-1,py],[px+1,py],[px,py-1],[px,py+1]);
+    }
+    if(pixels.length>best.size){
+      let sx=0,sy=0;
+      for(let p of pixels){sx+=p[0];sy+=p[1]}
+      best={x:sx/pixels.length,y:sy/pixels.length,size:pixels.length};
+    }
+  }
+  return best.size>15?best:null;
+}
+
+function calibrateAllFromSheet(d){
+  // collect all teal pixel coordinates
+  let pts=[];
+  for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){
+    let pi=(y*W+x)*4;
+    if(isTeal(d[pi],d[pi+1],d[pi+2]))pts.push({x,y});
+  }
+  // fallback if too few teal pixels
+  if(pts.length<30){
+    bbMinX=0;bbMaxX=W-1;bbMinY=0;bbMaxY=H-1;
+    let bw=W/3,bh=H/3,pos=[];
+    for(let r=0;r<3;r++)for(let c=0;c<3;c++)
+      pos.push({x:(c+0.5)/3,y:(r+0.5)/3});
+    return pos;
+  }
+  // bounding box for display
+  bbMinX=W;bbMaxX=0;bbMinY=H;bbMaxY=0;
+  for(let p of pts){
+    if(p.x<bbMinX)bbMinX=p.x;if(p.x>bbMaxX)bbMaxX=p.x;
+    if(p.y<bbMinY)bbMinY=p.y;if(p.y>bbMaxY)bbMaxY=p.y;
+  }
+  // k-means: find 9 clusters (one per piece)
+  let k=9,iters=12;
+  let cx=[];for(let i=0;i<k;i++)
+    cx.push({x:bbMinX+(bbMaxX-bbMinX)*((i%3)+0.5)/3,y:bbMinY+(bbMaxY-bbMinY)*(Math.floor(i/3)+0.5)/3});
+  for(let iter=0;iter<iters;iter++){
+    let sum=[];for(let i=0;i<k;i++)sum.push({x:0,y:0,c:0});
+    for(let p of pts){
+      let bi=0,bd=Infinity;
+      for(let i=0;i<k;i++){let d=(p.x-cx[i].x)**2+(p.y-cx[i].y)**2;if(d<bd){bd=d;bi=i}}
+      sum[bi].x+=p.x;sum[bi].y+=p.y;sum[bi].c++;
+    }
+    for(let i=0;i<k;i++)if(sum[i].c>0)cx[i]={x:sum[i].x/sum[i].c,y:sum[i].y/sum[i].c};
+  }
+  // sort into 3 rows × 3 cols (row-major: top→bottom, left→right)
+  cx.sort((a,b)=>a.y-b.y);
+  let rows=[cx.slice(0,3),cx.slice(3,6),cx.slice(6,9)];
+  for(let r of rows)r.sort((a,b)=>a.x-b.x);
+  let pos=[];
+  for(let r of rows)for(let p of r)pos.push({x:p.x/W,y:p.y/H});
+  return pos;
+}
+
+function detectLoop(){
+  try{
+    snapCam();
+    let img=ctx.getImageData(0,0,W,H);
+    let d=img.data;
+
+    if(mode==='calibrate'){
+      let calibPos=calibrateAllFromSheet(d);
+      cx.clearRect(0,0,cv.width,cv.height);
+      let bbx1=bbMinX*cv.width/W,bby1=bbMinY*cv.height/H;
+      let bbx2=bbMaxX*cv.width/W,bby2=bbMaxY*cv.height/H;
+      cx.strokeStyle='rgba(255,200,60,0.3)';cx.lineWidth=1;
+      cx.strokeRect(bbx1,bby1,bbx2-bbx1,bby2-bby1);
+      for(let i=1;i<3;i++){
+        cx.beginPath();
+        cx.moveTo(bbx1+(bbx2-bbx1)*i/3,bby1);
+        cx.lineTo(bbx1+(bbx2-bbx1)*i/3,bby2);
+        cx.moveTo(bbx1,bby1+(bby2-bby1)*i/3);
+        cx.lineTo(bbx2,bby1+(bby2-bby1)*i/3);
+        cx.stroke();
+      }
+      for(let i=0;i<9;i++){
+        let dx=calibPos[i].x*cv.width,dy=calibPos[i].y*cv.height;
+        cx.beginPath();cx.arc(dx,dy,12,0,Math.PI*2);
+        cx.fillStyle='rgba(60,220,120,0.7)';cx.fill();
+        cx.strokeStyle='#fff';cx.lineWidth=2;cx.stroke();
+        cx.fillStyle='#fff';
+        cx.font='bold 22px Georgia';
+        cx.textAlign='center';cx.textBaseline='middle';
+        cx.fillText(i+1,dx,dy-20);
+      }
+      document.getElementById('confirmbtn').style.display='block';
+      st.textContent='✅ 9 peças detectadas! Confirma?';
+    }else if(mode==='ready'){
+      cx.clearRect(0,0,cv.width,cv.height);
+    }else{
+      let fp=findFinger(d);
+      if(fp){
+        let bestP=0,bestD=999;
+        for(let i=0;i<9;i++){
+          if(state[i+1])continue;
+          if(!piecePos[i])continue;
+          let dx=fp.x/W-piecePos[i].x,dy=fp.y/H-piecePos[i].y;
+          let dist=dx*dx+dy*dy;
+          if(dist<bestD){bestD=dist;bestP=i+1}
+        }
+        if(bestP&&bestP===persistPiece)persist++;
+        else if(bestP){persistPiece=bestP;persist=1}
+        else{persist=0;persistPiece=0}
+        if(persist>=2&&Date.now()-lastSent>cooldown){
+          doClick(bestP);lastSent=Date.now();persist=0;
+        }
+      }else{
+        persist=0;persistPiece=0;
+      }
+      cx.clearRect(0,0,cv.width,cv.height);
+      let sw=cv.width/W,sh=cv.height/H;
+      if(piecePos.length===9){
+        for(let row=0;row<3;row++)for(let col=0;col<3;col++){
+          let idx=row*3+col;
+          let x1=col>0?(piecePos[idx].x+piecePos[idx-1].x)/2*W:0;
+          let x2=col<2?(piecePos[idx].x+piecePos[idx+1].x)/2*W:W;
+          let y1=row>0?(piecePos[idx].y+piecePos[idx-3].y)/2*H:0;
+          let y2=row<2?(piecePos[idx].y+piecePos[idx+3].y)/2*H:H;
+          cx.strokeStyle='rgba(255,255,255,0.3)';cx.lineWidth=1.5;
+          cx.strokeRect(x1*sw,y1*sh,(x2-x1)*sw,(y2-y1)*sh);
+        }
+      }
+    }
+  }catch(e){st.textContent='❌ detectLoop: '+e.message}
+  setTimeout(detectLoop,200);
+}
+
+document.getElementById('startbtn').addEventListener('click',function(){
+  this.style.display='none';
+  st.textContent='Recalibrando brilho... 3s';
+  // reset brightness reference (without sheet)
+  let acc=[];for(let i=0;i<9;i++)acc[i]=0;
+  let cnt=0;
+  function snapCal2(){
+    snapCam();
+    let d=ctx.getImageData(0,0,W,H).data;
+    for(let y=0;y<H;y+=2)for(let x=0;x<W;x+=2){
+      let p=Math.floor(y/(H/3))*3+Math.floor(x/(W/3));
+      let pi=(y*W+x)*4;
+      acc[p]+=d[pi]+d[pi+1]+d[pi+2];ref[p]=(ref[p]||0)+1;
+    }
+    cnt++;
+    if(cnt>=3){
+      for(let i=0;i<9;i++)ref[i]=acc[i]/ref[i];
+      // reset all pieces (send piece=0 as reset signal)
+      for(let i=1;i<=9;i++)state[i]=false;
+      db.collection('clicks').add({piece:0,timestamp:firebase.firestore.FieldValue.serverTimestamp()}).catch(function(){});
+      mode='play';
+      st.textContent='Jogando! Toque no PC';
+      setTimeout(function(){st.textContent='Toque no PC'},2000);
+    }else setTimeout(snapCal2,1000);
+  }
+  snapCal2();
+});
+
+document.getElementById('confirmbtn').addEventListener('click',function(){
+  this.style.display='none';
+  // read current positions from the overlay
+  let d=ctx.getImageData(0,0,W,H).data;
+  piecePos=calibrateAllFromSheet(d);
+  mode='ready';
+  st.textContent='✅ Calibrado! Remova a folha da tela do PC';
+  document.getElementById('startbtn').style.display='block';
+});
+
+function doClick(p){
+  if(state[p])return;
+  state[p]=true;
+  flash.style.opacity='1';setTimeout(function(){flash.style.opacity='0'},150);
+  if(navigator.vibrate)navigator.vibrate(25);
+  db.collection('clicks').add({piece:p,timestamp:firebase.firestore.FieldValue.serverTimestamp()}).catch(function(){});
+}
+</script>
+</body>
+</html>

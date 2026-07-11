@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gerar ArUco</title>
+<style>
+*{margin:0;padding:10px;box-sizing:border-box}
+body{background:#fff;font-family:Georgia,serif;text-align:center}
+h1{color:#333;font-size:22px;margin:10px}
+h2{color:#666;font-size:16px;margin:20px 0 10px;border-top:1px solid #ddd;padding-top:20px}
+.markers{display:flex;flex-wrap:wrap;justify-content:center;gap:30px;max-width:900px;margin:auto}
+.card{background:#f5f5f5;border-radius:12px;padding:20px;text-align:center}
+.card svg{width:200px;height:200px;display:block;margin:auto;border:1px solid #ddd;border-radius:4px}
+.card label{display:block;margin-top:10px;font-size:16px;color:#555}
+p{color:#888;font-size:14px;max-width:600px;margin:10px auto}
+</style>
+</head>
+<body>
+<h1>✦ Marcadores ArUco ✦</h1>
+<p><b>Peças:</b> IDs 0-3. Cole nas peças do puzzle.</p>
+<div class="markers" id="container"></div>
+<h2>📐 Cantos da tela</h2>
+<p><b>Cantos:</b> IDs 100-103. Cole nos 4 cantos do monitor do notebook para definir o centro da tela.</p>
+<div class="markers" id="corners"></div>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/cv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2/src/aruco.js"></script>
+<script>
+var dict=new AR.Dictionary('ARUCO');
+var c=document.getElementById('container');
+for(var i=0;i<4;i++){
+  var card=document.createElement('div');card.className='card';
+  card.innerHTML=dict.generateSVG(i)+'<label>ID '+i+' (peça '+(i+1)+')</label>';
+  c.appendChild(card);
+}
+var cc=document.getElementById('corners');
+for(var i=100;i<104;i++){
+  var card=document.createElement('div');card.className='card';
+  card.innerHTML=dict.generateSVG(i)+'<label>ID '+i+' (canto '+(i-99)+')</label>';
+  cc.appendChild(card);
+}
+</script>
+</body>
+</html>
